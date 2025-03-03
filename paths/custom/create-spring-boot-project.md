@@ -12,7 +12,7 @@ source: humanitec/paths/create-environment
 inputs: {{ project_name }} {{ application_name}} {{environment_name}}
 action-four
 source: github-actions
-inputs: gh clone {{ repo }} {{ target: {{project_name}}-{{application-name}} }}
+inputs: gh clone HARDCODED_SPING_BOOT_BOOTSTRAP {{ target: {{project_name}}-{{application-name}} }}
 action-five
 source: humanitec/paths/add-metadata
 input: {{gh repo}}
