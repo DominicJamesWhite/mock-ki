@@ -1,28 +1,32 @@
-id: bootstrap-application
-name: Bootstrap Application
-description: Creates an application with prod and pre-prod environments, adds a busybox workload, postgres and s3 resources, and deploys everything.
+id: create-secure-app
+name: Create secure application
+description: Creates a complete application with pre-prod and prod environments, clones a GitHub repo, builds an image, adds resources, and deploys.
 
 on:
   path_call:
     inputs:
       app_id:
         type: string
-        description: "Application ID to create"
+        description: "Application ID for the new application"
         required: true
       app_name:
         type: string
         description: "Friendly name for the application"
         required: true
-      image_tag:
+      github_token:
         type: string
-        description: "Tag for the busybox image"
+        description: "GitHub token with repo creation permissions"
+        required: true
+      image_registry:
+        type: string
+        description: "Container registry where the image will be pushed"
         required: true
 
-timeout-minutes: 30
+timeout-minutes: 60
 
 jobs:
-  create-app:
-    name: Create Application
+  create-application:
+    name: Create Application and Environments
     steps:
       - id: create-app
         name: Create the application
@@ -30,135 +34,230 @@ jobs:
         with:
           command: create app ${inputs.app_id} --name "${inputs.app_name}"
 
-  create-preprod-env:
-    name: Create Pre-Prod Environment
-    needs: create-app
-    steps:
-      - id: create-preprod
+      - id: create-preprod-env
         name: Create pre-prod environment
         uses: humanitec/cli-action
         with:
-          command: create env preprod --app ${inputs.app_id} --type pre-production
+          command: create env pre-prod --app ${inputs.app_id} --type pre-production
 
-  create-prod-env:
-    name: Create Production Environment
-    needs: create-app
-    steps:
-      - id: create-prod
+      - id: create-prod-env
         name: Create production environment
         uses: humanitec/cli-action
         with:
           command: create env prod --app ${inputs.app_id} --type production
 
-  setup-preprod:
-    name: Setup Pre-Prod Environment
-    needs: create-preprod-env
+  clone-repo:
+    name: Clone GitHub Repository
+    needs: create-application
+    steps:
+      - id: clone-repo
+        name: Clone repository to application name
+        uses: humanitec/http-request
+        with:
+          url: https://api.github.com/repos/template/super-secure-app-bootstrap/generate
+          method: POST
+          headers: |
+            Authorization: token ${{ inputs.github_token }}
+            Accept: application/vnd.github.v3+json
+            Content-Type: application/json
+          body: |
+            {
+              "owner": "your-org",
+              "name": "${{ inputs.app_id }}",
+              "description": "Bootstrapped application for ${{ inputs.app_name }}",
+              "private": true
+            }
+
+      - id: check-repo-status
+        name: Verify repository creation
+        uses: humanitec/http-request
+        with:
+          url: https://api.github.com/repos/your-org/${{ inputs.app_id }}
+          method: GET
+          headers: |
+            Authorization: token ${{ inputs.github_token }}
+            Accept: application/vnd.github.v3+json
+
+  build-image:
+    name: Build Container Image
+    needs: clone-repo
+    steps:
+      - id: trigger-build
+        name: Trigger image build
+        uses: humanitec/http-request
+        with:
+          url: https://api.your-ci-system.com/v1/build
+          method: POST
+          headers: |
+            Content-Type: application/json
+            Authorization: Bearer ${{ inputs.ci_token }}
+          body: |
+            {
+              "repository": "your-org/${{ inputs.app_id }}",
+              "branch": "main",
+              "image_name": "${{ inputs.image_registry }}/${{ inputs.app_id }}",
+              "tag": "initial"
+            }
+
+      - id: parse-build-response
+        name: Extract build ID
+        uses: humanitec/script
+        with:
+          script: |
+            const response = JSON.parse(process.env.BUILD_RESPONSE);
+            echo "::set-output name=build_id::${response.build_id}";
+        env:
+          BUILD_RESPONSE: ${{ steps.trigger-build.outputs.body }}
+
+      - id: wait-for-build
+        name: Wait for build completion
+        uses: humanitec/http-request
+        with:
+          url: https://api.your-ci-system.com/v1/build/${{ steps.parse-build-response.outputs.build_id }}
+          method: GET
+          headers: |
+            Authorization: Bearer ${{ inputs.ci_token }}
+          retry: 30
+          retry-delay: 30
+          retry-condition: 'statusCode === 200 && JSON.parse(body).status !== "completed"'
+
+      - id: get-image-tag
+        name: Get full image reference
+        uses: humanitec/script
+        with:
+          script: |
+            const buildInfo = JSON.parse(process.env.BUILD_INFO);
+            const fullImage = `${inputs.image_registry}/${inputs.app_id}:${buildInfo.image_tag || 'initial'}`;
+            echo "::set-output name=full_image::${fullImage}";
+        env:
+          BUILD_INFO: ${{ steps.wait-for-build.outputs.body }}
+
+  deploy-preprod:
+    name: Deploy to Pre-Production
+    needs: build-image
     steps:
       - id: create-delta
         name: Create deployment delta
+        uses: humanitec/create-delta
+        with:
+          app: ${{ inputs.app_id }}
+          env: pre-prod
+          name: "Initial deployment with resources"
+
+      - id: add-workload
+        name: Add application workload
+        uses: humanitec/update-delta
+        with:
+          app: ${{ inputs.app_id }}
+          delta_id: ${{ steps.create-delta.outputs.delta_id }}
+          operations: |
+            - op: add
+              path: /modules/${{ inputs.app_id }}
+              value:
+                type: workload
+                metadata:
+                  id: ${{ inputs.app_id }}
+                  name: ${{ inputs.app_id }}
+                spec:
+                  containers:
+                    main:
+                      image: ${{ needs.build-image.outputs.full_image }}
+                      resources:
+                        limits:
+                          cpu: 200m
+                          memory: 256Mi
+                        requests:
+                          cpu: 100m
+                          memory: 128Mi
+
+      - id: add-postgres
+        name: Add Postgres database
+        uses: humanitec/update-delta
+        with:
+          app: ${{ inputs.app_id }}
+          delta_id: ${{ steps.create-delta.outputs.delta_id }}
+          operations: |
+            - op: add
+              path: /resources/postgres/app-db
+              value:
+                type: postgres
+                name: app-db
+                class: secure
+            - op: add
+              path: /modules/${{ inputs.app_id }}/externals/postgres
+              value:
+                resource:
+                  definition: shared-postgres
+                  resource: app-db
+                  match:
+                    name: postgres
+
+      - id: add-s3
+        name: Add S3 bucket
+        uses: humanitec/update-delta
+        with:
+          app: ${{ inputs.app_id }}
+          delta_id: ${{ steps.create-delta.outputs.delta_id }}
+          operations: |
+            - op: add
+              path: /resources/s3/app-storage
+              value:
+                type: s3
+                name: app-storage
+                class: secure
+            - op: add
+              path: /modules/${{ inputs.app_id }}/externals/storage
+              value:
+                resource:
+                  definition: shared-s3
+                  resource: app-storage
+                  match:
+                    name: s3
+
+      - id: deploy-preprod
+        name: Deploy to pre-prod
+        uses: humanitec/deploy-delta
+        with:
+          app: ${{ inputs.app_id }}
+          env: pre-prod
+          delta_id: ${{ steps.create-delta.outputs.delta_id }}
+          message: "Initial deployment with all required resources"
+
+  deploy-prod:
+    name: Deploy to Production
+    needs: deploy-preprod
+    steps:
+      - id: create-cloned-delta
+        name: Create deployment delta for production
         uses: humanitec/cli-action
         with:
-          command: create delta --name "Bootstrap application resources" --app ${inputs.app_id} --env preprod -o json
+          command: create delta --name "Clone from pre-prod" --app ${inputs.app_id} --env prod -o json
 
       - id: get-delta-id
-        name: Extract Delta ID
-        uses: humanitec/javascript-action
+        name: Extract delta ID
+        uses: humanitec/script
         with:
           script: |
             const delta = JSON.parse(process.env.DELTA_OUTPUT);
-            return delta.metadata.id;
+            echo "::set-output name=delta_id::${delta.metadata.id}";
         env:
-          DELTA_OUTPUT: ${{ steps.create-delta.outputs.stdout }}
+          DELTA_OUTPUT: ${{ steps.create-cloned-delta.outputs.stdout }}
 
-      - id: add-workload
-        name: Add busybox workload
+      - id: clone-deployment
+        name: Clone pre-prod deployment to prod
         uses: humanitec/cli-action
         with:
-          command: |
-            update delta ${steps.get-delta-id.outputs.result} add /modules/busybox-app '{
-              "type": "workload",
-              "metadata": {
-                "id": "busybox-app",
-                "name": "Busybox Application"
-              },
-              "spec": {
-                "containers": {
-                  "main": {
-                    "image": "busybox:${inputs.image_tag}",
-                    "resources": {
-                      "limits": {
-                        "cpu": "100m",
-                        "memory": "128Mi"
-                      },
-                      "requests": {
-                        "cpu": "50m",
-                        "memory": "64Mi"
-                      }
-                    }
-                  }
-                }
-              }
-            }' --app ${inputs.app_id}
+          command: update delta ${steps.get-delta-id.outputs.delta_id} clone env/pre-prod --app ${inputs.app_id}
 
-      - id: add-postgres
-        name: Add postgres resource
-        uses: humanitec/cli-action
+      - id: deploy-prod
+        name: Deploy to production
+        uses: humanitec/deploy-delta
         with:
-          command: |
-            update delta ${steps.get-delta-id.outputs.result} add /resources/postgres/main-db '{
-              "type": "postgres",
-              "name": "main-db",
-              "class": "secure"
-            }' --app ${inputs.app_id}
-
-      - id: add-s3
-        name: Add s3 resource
-        uses: humanitec/cli-action
-        with:
-          command: |
-            update delta ${steps.get-delta-id.outputs.result} add /resources/s3/storage '{
-              "type": "s3",
-              "name": "storage",
-              "class": "secure"
-            }' --app ${inputs.app_id}
-
-      - id: connect-resources
-        name: Connect resources to workload
-        uses: humanitec/cli-action
-        with:
-          command: |
-            update delta ${steps.get-delta-id.outputs.result} add /modules/busybox-app/externals/main-db '{
-              "resource_ref": {
-                "id": "postgres.main-db"
-              }
-            }' --app ${inputs.app_id}
-
-      - id: connect-s3
-        name: Connect S3 to workload
-        uses: humanitec/cli-action
-        with:
-          command: |
-            update delta ${steps.get-delta-id.outputs.result} add /modules/busybox-app/externals/storage '{
-              "resource_ref": {
-                "id": "s3.storage"
-              }
-            }' --app ${inputs.app_id}
-
-      - id: deploy-delta
-        name: Deploy the configuration
-        uses: humanitec/cli-action
-        with:
-          command: deploy delta ${steps.get-delta-id.outputs.result} preprod --app ${inputs.app_id} --message "Bootstrap application setup"
-
-  promote-to-prod:
-    name: Promote to Production
-    needs: [create-prod-env, setup-preprod]
-    steps:
-      - id: clone-env
-        name: Clone preprod to prod
-        uses: humanitec/cli-action
-        with:
-          command: deploy deploy . prod --app ${inputs.app_id} --from-env preprod --message "Promote configuration to production"
+          app: ${{ inputs.app_id }}
+          env: prod
+          delta_id: ${{ steps.get-delta-id.outputs.delta_id }}
+          message: "Initial production deployment cloned from pre-prod"
 
     outputs:
-      deployment_id: ${{ steps.clone-env.outputs.deployment_id }}
+      preprod_deployment_id: ${{ needs.deploy-preprod.outputs.deployment_id }}
+      prod_deployment_id: ${{ steps.deploy-prod.outputs.deployment_id }}
