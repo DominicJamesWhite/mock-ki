@@ -1,0 +1,98 @@
+id: add-resource
+name: Add Resource to Environment
+description: Add a resource to an existing environment.
+
+on:
+  path_call:
+    inputs:
+      app_id:
+        type: string
+        description: "Application ID where the environment exists"
+        required: true
+      env_id:
+        type: string
+        description: "Environment ID to add the resource to"
+        required: true
+      resource_type:
+        type: string
+        description: "Type of resource to add (e.g. mysql, redis, dns)"
+        required: true
+      resource_name:
+        type: string
+        description: "Name for the resource"
+        required: true
+      resource_class:
+        type: string
+        description: "Resource class or tier (e.g. small, medium, large)"
+        required: false
+      resource_version:
+        type: string
+        description: "Version of the resource if applicable"
+        required: false
+
+timeout-minutes: 15
+
+jobs:
+  validate-inputs:
+    name: Validate Resource Inputs
+    steps:
+      - id: check-resource-type
+        name: Validate Resource Type
+        uses: humanitec/cli-action
+        with:
+          command: get resource-type --filter-type ${inputs.resource_type} -o json
+      - id: validate-resource-type
+        name: Check if Resource Type is Valid
+        uses: humanitec/javascript-action
+        with:
+          script: |
+            const resourceType = JSON.parse(process.env.RESOURCE_TYPE_OUTPUT || '[]');
+            if (resourceType.length === 0) {
+              core.setFailed(`Resource type '${inputs.resource_type}' is not available`);
+              return false;
+            }
+            return true;
+        env:
+          RESOURCE_TYPE_OUTPUT: ${{ steps.check-resource-type.outputs.stdout }}
+
+  add-resource:
+    name: Add Resource to Environment
+    needs: validate-inputs
+    steps:
+      - id: create-delta
+        name: Create Deployment Delta
+        uses: humanitec/cli-action
+        with:
+          command: create delta --name "Add ${inputs.resource_name} resource" --app ${inputs.app_id} --env ${inputs.env_id} -o json
+
+      - id: get-delta-id
+        name: Extract Delta ID
+        uses: humanitec/javascript-action
+        with:
+          script: |
+            const delta = JSON.parse(process.env.DELTA_OUTPUT);
+            return delta.metadata.id;
+        env:
+          DELTA_OUTPUT: ${{ steps.create-delta.outputs.stdout }}
+
+      - id: update-delta
+        name: Update Delta with Resource
+        uses: humanitec/cli-action
+        with:
+          command: |
+            update delta ${steps.get-delta-id.outputs.result} add /resources/${inputs.resource_type}/${inputs.resource_name} '{
+              "type": "${inputs.resource_type}",
+              "name": "${inputs.resource_name}",
+              "class": "${inputs.resource_class || 'default'}"
+              ${{ inputs.resource_version ? ', "version": "' + inputs.resource_version + '"' : '' }}
+            }' --app ${inputs.app_id}
+
+      - id: deploy-delta
+        name: Deploy the Delta
+        uses: humanitec/cli-action
+        with:
+          command: deploy delta ${steps.get-delta-id.outputs.result} ${inputs.env_id} --app ${inputs.app_id} --message "Added ${inputs.resource_type}"
+
+    outputs:
+      delta_id: ${{ steps.get-delta-id.outputs.result }}
+      resource_id: "${inputs.resource_type}.${inputs.resource_name}"

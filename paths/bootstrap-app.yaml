@@ -1,0 +1,72 @@
+id: deploy-app
+name: Deploy Application with Environments
+description: Create an application and set up development, staging, and production environments.
+on:
+  path_call:
+    inputs:
+      app_id:
+        type: string
+        description: "Application ID to create"
+        required: true
+      app_name:
+        type: string
+        description: "Friendly name for the application"
+        required: true
+      image_tag:
+        type: string
+        description: "Container image tag to deploy"
+        required: true
+
+jobs:
+  create-app:
+    name: Create Humanitec Application
+    steps:
+      - id: create-app
+        name: Create the application
+        uses: humanitec/cli-action
+        with:
+          command: create app ${inputs.app_id} --name "${inputs.app_name}"
+
+  create-envs:
+    name: Create Environments
+    needs: [create-app]
+    steps:
+      - id: create-dev
+        name: Create Development Environment
+        uses: humanitec/cli-action
+        with:
+          command: create env development --app ${inputs.app_id} --type development
+
+      - id: create-staging
+        name: Create Staging Environment
+        uses: humanitec/cli-action
+        with:
+          command: create env staging --app ${inputs.app_id} --type staging --from development
+
+      - id: create-prod
+        name: Create Production Environment
+        uses: humanitec/cli-action
+        with:
+          command: create env production --app ${inputs.app_id} --type production --from staging
+
+  deploy:
+    name: Deploy Application
+    needs: [create-envs]
+    steps:
+      - id: deploy-dev
+        name: Deploy to Development
+        uses: humanitec/cli-action
+        with:
+          command: score deploy --app ${inputs.app_id} --env development --image my-app:${inputs.image_tag}
+
+      - id: deploy-staging
+        name: Deploy to Staging
+        uses: humanitec/cli-action
+        with:
+          command: score deploy --app ${inputs.app_id} --env staging --image my-app:${inputs.image_tag}
+
+      - id: deploy-prod
+        name: Deploy to Production
+        uses: humanitec/cli-action
+        with:
+          command: score deploy --app ${inputs.app_id} --env production --image my-app:${inputs.image_tag}

@@ -1,39 +1,32 @@
 id: create-application
-name: Create Humanitec Application
+name: Create Application
+description: Create a new application.
 on:
   path_call:
     inputs:
       app_id:
         type: string
-        description: The ID of the application to create
+        description: "Application ID to create"
         required: true
       app_name:
         type: string
-        description: The name of the application
+        description: "Friendly name for the application"
         required: true
-      app_metadata:
+      env_type:
         type: string
-        description: Application metadata
+        description: "Environment type for the initial environment"
+        required: true
+      create_initial_env:
+        type: boolean
+        description: "Whether to create an initial environment"
         required: false
 
 jobs:
   create-app:
-    name: Create Application
+    name: Create Humanitec Application
     steps:
-      - id: create-application
-        name: Create Application
-        uses: humtcl/create-application
+      - id: create-app
+        name: Create the application
+        uses: humanitec/cli-action
         with:
-          app_id: ${{ inputs.app_id }}
-          name: ${{ inputs.app_name }}
-          org_id: ${{ inputs.org_id }}
-          description: ${{ inputs.app_description }}
-
-    outputs:
-      status: ${{ steps.output-result.outputs.status }}
-      message: ${{ steps.output-result.outputs.message }}
-      app_url: ${{ steps.output-result.outputs.app_url }}
-
-timeout-minutes: 5
-permissions:
-  application: admin
+          command: create app ${inputs.app_id} --name "${inputs.app_name}"
