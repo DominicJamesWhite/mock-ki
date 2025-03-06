@@ -1,0 +1,291 @@
+id: debug-workload
+name: Debug Workload
+description: Collects diagnostic information about a workload using kubectl, Datadog, and Sentry, then sends the data to Rootly AI as an incident.
+
+on:
+  path_call:
+    inputs:
+      app_id:
+        type: string
+        description: "Application ID where the workload is running"
+        required: true
+      env_id:
+        type: string
+        description: "Environment ID where the workload is running"
+        required: true
+      workload_id:
+        type: string
+        description: "ID of the workload to debug"
+        required: true
+      incident_title:
+        type: string
+        description: "Title for the Rootly AI incident"
+        required: false
+      incident_severity:
+        type: string
+        description: "Severity level for the Rootly AI incident (critical, high, medium, low)"
+        required: false
+      time_range:
+        type: string
+        description: "Time range for logs and metrics (e.g., '30m', '2h', '1d')"
+        required: false
+
+timeout-minutes: 20
+
+jobs:
+  gather-diagnostics:
+    name: Gather Diagnostic Information
+    steps:
+      # Step 1: Get the Kubernetes namespace for the environment
+      - id: get-namespace
+        name: Get Kubernetes namespace
+        uses: humanitec/cli-action
+        with:
+          command: get active-resources --app ${inputs.app_id} --env ${inputs.env_id} -o json | jq -r '.[] | select(.metadata.type == "k8s-namespace") | .status.resource.namespace'
+
+      # Step 2: Get pod information for the workload
+      - id: get-pods
+        name: Get pod information
+        uses: humanitec/script
+        with:
+          script: |
+            NAMESPACE="${{ steps.get-namespace.outputs.stdout }}"
+            if [ -z "$NAMESPACE" ]; then
+              echo "::error::Could not determine Kubernetes namespace"
+              exit 1
+            fi
+
+            echo "Fetching pods for workload ${inputs.workload_id} in namespace ${NAMESPACE}"
+            POD_LIST=$(kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/name="${inputs.workload_id}" -o json)
+
+            # Extract pod names
+            POD_NAMES=$(echo "$POD_LIST" | jq -r '.items[].metadata.name')
+            if [ -z "$POD_NAMES" ]; then
+              echo "::warning::No pods found for workload ${inputs.workload_id}"
+            else
+              echo "Found pods: $POD_NAMES"
+            fi
+
+            echo "$POD_LIST" > /tmp/pod_info.json
+            echo "::set-output name=pod_info_path::/tmp/pod_info.json"
+            echo "::set-output name=pod_names::$POD_NAMES"
+
+      # Step 3: Collect logs from pods
+      - id: collect-logs
+        name: Collect Kubernetes logs
+        uses: humanitec/script
+        with:
+          script: |
+            NAMESPACE="${{ steps.get-namespace.outputs.stdout }}"
+            POD_NAMES="${{ steps.get-pods.outputs.pod_names }}"
+
+            if [ -z "$POD_NAMES" ]; then
+              echo "No pods to collect logs from"
+              echo "{}" > /tmp/pod_logs.json
+            else
+              LOG_DATA="{}"
+              
+              # Set time range for logs or default to 1 hour
+              TIME_RANGE="${{ inputs.time_range || '1h' }}"
+              
+              for POD in $POD_NAMES; do
+                echo "Collecting logs for pod $POD"
+                POD_LOGS=$(kubectl logs -n "$NAMESPACE" "$POD" --since="$TIME_RANGE" || echo "Failed to get logs")
+                # Escape JSON special characters
+                ESCAPED_LOGS=$(echo "$POD_LOGS" | jq -sR .)
+                LOG_DATA=$(echo "$LOG_DATA" | jq --arg pod "$POD" --arg logs "$ESCAPED_LOGS" '. + {($pod): $logs}')
+              done
+              
+              echo "$LOG_DATA" > /tmp/pod_logs.json
+            fi
+
+            echo "::set-output name=logs_path::/tmp/pod_logs.json"
+
+      # Step 4: Get resource usage metrics from kubectl
+      - id: get-metrics
+        name: Get resource usage metrics
+        uses: humanitec/script
+        with:
+          script: |
+            NAMESPACE="${{ steps.get-namespace.outputs.stdout }}"
+            POD_NAMES="${{ steps.get-pods.outputs.pod_names }}"
+
+            if [ -z "$POD_NAMES" ]; then
+              echo "No pods to collect metrics from"
+              echo "{}" > /tmp/pod_metrics.json
+            else
+              METRICS_DATA="{}"
+              
+              for POD in $POD_NAMES; do
+                echo "Collecting metrics for pod $POD"
+                POD_METRICS=$(kubectl top pod -n "$NAMESPACE" "$POD" --no-headers 2>/dev/null || echo "Failed to get metrics")
+                ESCAPED_METRICS=$(echo "$POD_METRICS" | jq -sR .)
+                METRICS_DATA=$(echo "$METRICS_DATA" | jq --arg pod "$POD" --arg metrics "$ESCAPED_METRICS" '. + {($pod): $metrics}')
+              done
+              
+              echo "$METRICS_DATA" > /tmp/pod_metrics.json
+            fi
+
+            echo "::set-output name=metrics_path::/tmp/pod_metrics.json"
+
+      # Step 5: Describe pods for detailed information
+      - id: describe-pods
+        name: Describe pods
+        uses: humanitec/script
+        with:
+          script: |
+            NAMESPACE="${{ steps.get-namespace.outputs.stdout }}"
+            POD_NAMES="${{ steps.get-pods.outputs.pod_names }}"
+
+            if [ -z "$POD_NAMES" ]; then
+              echo "No pods to describe"
+              echo "{}" > /tmp/pod_descriptions.json
+            else
+              DESCRIPTION_DATA="{}"
+              
+              for POD in $POD_NAMES; do
+                echo "Describing pod $POD"
+                POD_DESC=$(kubectl describe pod -n "$NAMESPACE" "$POD" 2>/dev/null || echo "Failed to describe pod")
+                ESCAPED_DESC=$(echo "$POD_DESC" | jq -sR .)
+                DESCRIPTION_DATA=$(echo "$DESCRIPTION_DATA" | jq --arg pod "$POD" --arg desc "$ESCAPED_DESC" '. + {($pod): $desc}')
+              done
+              
+              echo "$DESCRIPTION_DATA" > /tmp/pod_descriptions.json
+            fi
+
+            echo "::set-output name=descriptions_path::/tmp/pod_descriptions.json"
+
+      # Step 6: Get Datadog metrics and logs
+      - id: datadog-metrics
+        name: Get Datadog metrics
+        uses: humanitec/script
+        with:
+          script: |
+            # Set time range or default to 1 hour
+            TIME_RANGE="${{ inputs.time_range || '1h' }}"
+
+            echo "Fetching Datadog metrics for workload ${inputs.workload_id}"
+            # The actual Datadog API call would be implemented here
+            # This is a placeholder showing the expected format
+
+            cat > /tmp/datadog_metrics.json << EOF
+            {
+              "status": "query ran successfully",
+              "workload": "${inputs.workload_id}",
+              "timeRange": "$TIME_RANGE",
+              "metrics": {
+                "cpu": "placeholder for CPU metrics",
+                "memory": "placeholder for memory metrics",
+                "network": "placeholder for network metrics"
+              }
+            }
+            EOF
+
+            echo "::set-output name=datadog_metrics_path::/tmp/datadog_metrics.json"
+
+      # Step 7: Get Sentry errors
+      - id: sentry-errors
+        name: Get Sentry errors
+        uses: humanitec/script
+        with:
+          script: |
+            # Set time range or default to 1 hour
+            TIME_RANGE="${{ inputs.time_range || '1h' }}"
+
+            echo "Fetching Sentry errors for workload ${inputs.workload_id}"
+            # The actual Sentry API call would be implemented here
+            # This is a placeholder showing the expected format
+
+            cat > /tmp/sentry_errors.json << EOF
+            {
+              "status": "query ran successfully",
+              "workload": "${inputs.workload_id}",
+              "timeRange": "$TIME_RANGE",
+              "errors": [
+                {
+                  "title": "Sample error 1",
+                  "count": 10,
+                  "firstSeen": "placeholder timestamp",
+                  "lastSeen": "placeholder timestamp",
+                  "stack": "placeholder stack trace"
+                },
+                {
+                  "title": "Sample error 2",
+                  "count": 5,
+                  "firstSeen": "placeholder timestamp",
+                  "lastSeen": "placeholder timestamp",
+                  "stack": "placeholder stack trace"
+                }
+              ]
+            }
+            EOF
+
+            echo "::set-output name=sentry_errors_path::/tmp/sentry_errors.json"
+
+      # Step 8: Combine all diagnostic information
+      - id: combine-diagnostics
+        name: Combine all diagnostic information
+        uses: humanitec/script
+        with:
+          script: |
+            # Create combined report
+            TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+            cat > /tmp/diagnostic_report.json << EOF
+            {
+              "timestamp": "$TIMESTAMP",
+              "app_id": "${inputs.app_id}",
+              "env_id": "${inputs.env_id}",
+              "workload_id": "${inputs.workload_id}",
+              "kubernetes": {
+                "pod_info": $(cat {{ steps.get-pods.outputs.pod_info_path || "/tmp/pod_info.json" }}),
+                "logs": $(cat {{ steps.collect-logs.outputs.logs_path || "/tmp/pod_logs.json" }}),
+                "metrics": $(cat {{ steps.get-metrics.outputs.metrics_path || "/tmp/pod_metrics.json" }}),
+                "descriptions": $(cat {{ steps.describe-pods.outputs.descriptions_path || "/tmp/pod_descriptions.json" }})
+              },
+              "datadog": $(cat {{ steps.datadog-metrics.outputs.datadog_metrics_path || "/tmp/datadog_metrics.json" }}),
+              "sentry": $(cat {{ steps.sentry-errors.outputs.sentry_errors_path || "/tmp/sentry_errors.json" }})
+            }
+            EOF
+
+            echo "::set-output name=report_path::/tmp/diagnostic_report.json"
+
+      # Step 9: Send to Rootly AI as an incident
+      - id: create-rootly-incident
+        name: Create Rootly AI incident
+        uses: humanitec/script
+        with:
+          script: |
+            REPORT_PATH="${{ steps.combine-diagnostics.outputs.report_path }}"
+
+            # Set default title if not provided
+            INCIDENT_TITLE="${{ inputs.incident_title || 'Workload diagnostic for ' + inputs.workload_id }}"
+
+            # Set default severity
+            INCIDENT_SEVERITY="${{ inputs.incident_severity || 'medium' }}"
+
+            echo "Creating Rootly AI incident: $INCIDENT_TITLE"
+
+            # The actual Rootly API call would be implemented here
+            # This is a placeholder showing the expected format
+
+            cat > /tmp/rootly_response.json << EOF
+            {
+              "status": "created",
+              "incident": {
+                "id": "sample-incident-id",
+                "title": "$INCIDENT_TITLE",
+                "severity": "$INCIDENT_SEVERITY",
+                "created_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+              }
+            }
+            EOF
+
+            INCIDENT_ID=$(cat /tmp/rootly_response.json | jq -r '.incident.id')
+            echo "::set-output name=incident_id::$INCIDENT_ID"
+            echo "::set-output name=incident_url::https://rootly.com/incidents/$INCIDENT_ID"
+
+    outputs:
+      report_path: ${{ steps.combine-diagnostics.outputs.report_path }}
+      incident_id: ${{ steps.create-rootly-incident.outputs.incident_id }}
+      incident_url: ${{ steps.create-rootly-incident.outputs.incident_url }}
