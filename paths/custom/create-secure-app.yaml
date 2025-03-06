@@ -1,0 +1,164 @@
+id: bootstrap-application
+name: Bootstrap Application
+description: Creates an application with prod and pre-prod environments, adds a busybox workload, postgres and s3 resources, and deploys everything.
+
+on:
+  path_call:
+    inputs:
+      app_id:
+        type: string
+        description: "Application ID to create"
+        required: true
+      app_name:
+        type: string
+        description: "Friendly name for the application"
+        required: true
+      image_tag:
+        type: string
+        description: "Tag for the busybox image"
+        required: true
+
+timeout-minutes: 30
+
+jobs:
+  create-app:
+    name: Create Application
+    steps:
+      - id: create-app
+        name: Create the application
+        uses: humanitec/cli-action
+        with:
+          command: create app ${inputs.app_id} --name "${inputs.app_name}"
+
+  create-preprod-env:
+    name: Create Pre-Prod Environment
+    needs: create-app
+    steps:
+      - id: create-preprod
+        name: Create pre-prod environment
+        uses: humanitec/cli-action
+        with:
+          command: create env preprod --app ${inputs.app_id} --type pre-production
+
+  create-prod-env:
+    name: Create Production Environment
+    needs: create-app
+    steps:
+      - id: create-prod
+        name: Create production environment
+        uses: humanitec/cli-action
+        with:
+          command: create env prod --app ${inputs.app_id} --type production
+
+  setup-preprod:
+    name: Setup Pre-Prod Environment
+    needs: create-preprod-env
+    steps:
+      - id: create-delta
+        name: Create deployment delta
+        uses: humanitec/cli-action
+        with:
+          command: create delta --name "Bootstrap application resources" --app ${inputs.app_id} --env preprod -o json
+
+      - id: get-delta-id
+        name: Extract Delta ID
+        uses: humanitec/javascript-action
+        with:
+          script: |
+            const delta = JSON.parse(process.env.DELTA_OUTPUT);
+            return delta.metadata.id;
+        env:
+          DELTA_OUTPUT: ${{ steps.create-delta.outputs.stdout }}
+
+      - id: add-workload
+        name: Add busybox workload
+        uses: humanitec/cli-action
+        with:
+          command: |
+            update delta ${steps.get-delta-id.outputs.result} add /modules/busybox-app '{
+              "type": "workload",
+              "metadata": {
+                "id": "busybox-app",
+                "name": "Busybox Application"
+              },
+              "spec": {
+                "containers": {
+                  "main": {
+                    "image": "busybox:${inputs.image_tag}",
+                    "resources": {
+                      "limits": {
+                        "cpu": "100m",
+                        "memory": "128Mi"
+                      },
+                      "requests": {
+                        "cpu": "50m",
+                        "memory": "64Mi"
+                      }
+                    }
+                  }
+                }
+              }
+            }' --app ${inputs.app_id}
+
+      - id: add-postgres
+        name: Add postgres resource
+        uses: humanitec/cli-action
+        with:
+          command: |
+            update delta ${steps.get-delta-id.outputs.result} add /resources/postgres/main-db '{
+              "type": "postgres",
+              "name": "main-db",
+              "class": "secure"
+            }' --app ${inputs.app_id}
+
+      - id: add-s3
+        name: Add s3 resource
+        uses: humanitec/cli-action
+        with:
+          command: |
+            update delta ${steps.get-delta-id.outputs.result} add /resources/s3/storage '{
+              "type": "s3",
+              "name": "storage",
+              "class": "secure"
+            }' --app ${inputs.app_id}
+
+      - id: connect-resources
+        name: Connect resources to workload
+        uses: humanitec/cli-action
+        with:
+          command: |
+            update delta ${steps.get-delta-id.outputs.result} add /modules/busybox-app/externals/main-db '{
+              "resource_ref": {
+                "id": "postgres.main-db"
+              }
+            }' --app ${inputs.app_id}
+
+      - id: connect-s3
+        name: Connect S3 to workload
+        uses: humanitec/cli-action
+        with:
+          command: |
+            update delta ${steps.get-delta-id.outputs.result} add /modules/busybox-app/externals/storage '{
+              "resource_ref": {
+                "id": "s3.storage"
+              }
+            }' --app ${inputs.app_id}
+
+      - id: deploy-delta
+        name: Deploy the configuration
+        uses: humanitec/cli-action
+        with:
+          command: deploy delta ${steps.get-delta-id.outputs.result} preprod --app ${inputs.app_id} --message "Bootstrap application setup"
+
+  promote-to-prod:
+    name: Promote to Production
+    needs: [create-prod-env, setup-preprod]
+    steps:
+      - id: clone-env
+        name: Clone preprod to prod
+        uses: humanitec/cli-action
+        with:
+          command: deploy deploy . prod --app ${inputs.app_id} --from-env preprod --message "Promote configuration to production"
+
+    outputs:
+      deployment_id: ${{ steps.clone-env.outputs.deployment_id }}
