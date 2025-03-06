@@ -1,0 +1,374 @@
+id: get-workload-state
+name: Get Workload State
+description: Retrieves comprehensive state information about a workload including metadata from Snyk, Datadog, Prometheus, KubeCost, and other enterprise tools.
+
+on:
+  path_call:
+    inputs:
+      app_id:
+        type: string
+        description: "Application ID where the workload is running"
+        required: true
+      env_id:
+        type: string
+        description: "Environment ID where the workload is running"
+        required: true
+      workload_id:
+        type: string
+        description: "ID of the workload to query"
+        required: true
+      time_range:
+        type: string
+        description: "Time range for metrics and logs (e.g., '30m', '2h', '1d')"
+        required: false
+      include_logs:
+        type: boolean
+        description: "Whether to include container logs in the response"
+        required: false
+      include_metrics:
+        type: boolean
+        description: "Whether to include detailed metrics in the response"
+        required: false
+
+timeout-minutes: 10
+
+jobs:
+  get-basic-info:
+    name: Get Basic Workload Information
+    steps:
+      # Get the Kubernetes namespace for the environment
+      - id: get-namespace
+        name: Get Kubernetes namespace
+        uses: humanitec/cli-action
+        with:
+          command: get active-resources --app ${inputs.app_id} --env ${inputs.env_id} -o json | jq -r '.[] | select(.metadata.type == "k8s-namespace") | .status.resource.namespace'
+
+      # Get workload deployment configuration
+      - id: get-workload-config
+        name: Get workload deployment configuration
+        uses: humanitec/cli-action
+        with:
+          command: |
+            api get /orgs/${HUMANITEC_ORG}/apps/${inputs.app_id}/envs/${inputs.env_id}/resources | \
+            jq '.[] | select(.id == "modules.${inputs.workload_id}")'
+
+      # Get pod information for the workload
+      - id: get-pods
+        name: Get pod information
+        uses: humanitec/script
+        with:
+          script: |
+            NAMESPACE="${{ steps.get-namespace.outputs.stdout }}"
+            if [ -z "$NAMESPACE" ]; then
+              echo "::error::Could not determine Kubernetes namespace"
+              exit 1
+            fi
+
+            echo "Fetching pods for workload ${inputs.workload_id} in namespace ${NAMESPACE}"
+            kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/name="${inputs.workload_id}" -o json > /tmp/pod_info.json
+
+            # Extract pod names and statuses for summary
+            POD_SUMMARY=$(kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/name="${inputs.workload_id}" -o custom-columns=NAME:.metadata.name,STATUS:.status.phase,READY:.status.containerStatuses[0].ready,RESTARTS:.status.containerStatuses[0].restartCount --no-headers)
+
+            echo "$POD_SUMMARY" > /tmp/pod_summary.txt
+            echo "::set-output name=pod_info_path::/tmp/pod_info.json"
+            echo "::set-output name=pod_summary_path::/tmp/pod_summary.txt"
+
+      # Get workload events
+      - id: get-events
+        name: Get Kubernetes events for workload
+        uses: humanitec/script
+        with:
+          script: |
+            NAMESPACE="${{ steps.get-namespace.outputs.stdout }}"
+
+            # Get events related to the workload
+            kubectl get events -n "$NAMESPACE" --field-selector involvedObject.name=$(kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/name="${inputs.workload_id}" -o jsonpath='{.items[0].metadata.name}') -o json > /tmp/workload_events.json
+
+            echo "::set-output name=events_path::/tmp/workload_events.json"
+
+  get-security-info:
+    name: Get Security Information
+    needs: get-basic-info
+    steps:
+      # Get Snyk vulnerability data
+      - id: get-snyk-data
+        name: Get Snyk vulnerability data
+        uses: humanitec/script
+        with:
+          script: |
+            # This would be a real API call to Snyk in a production implementation
+            # Here we're creating sample data
+
+            cat > /tmp/snyk_data.json << EOF
+            {
+              "workload": "${inputs.workload_id}",
+              "vulnerabilities": {
+                "high": 2,
+                "medium": 5,
+                "low": 12
+              },
+              "last_scanned": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+              "image_issues": [
+                {
+                  "id": "SNYK-UBUNTU-OPENSSL-3314796",
+                  "title": "Use After Free",
+                  "severity": "high",
+                  "url": "https://security.snyk.io/vuln/SNYK-UBUNTU-OPENSSL-3314796"
+                },
+                {
+                  "id": "SNYK-DEBIAN-EXPAT-2329088",
+                  "title": "XML External Entity (XXE) Injection",
+                  "severity": "medium",
+                  "url": "https://security.snyk.io/vuln/SNYK-DEBIAN-EXPAT-2329088"
+                }
+              ],
+              "code_issues": [
+                {
+                  "id": "SNYK-JS-AXIOS-6144880",
+                  "title": "Server-Side Request Forgery (SSRF)",
+                  "severity": "high",
+                  "url": "https://security.snyk.io/vuln/SNYK-JS-AXIOS-6144880"
+                }
+              ]
+            }
+            EOF
+
+            echo "::set-output name=snyk_path::/tmp/snyk_data.json"
+
+  get-observability-info:
+    name: Get Observability Data
+    needs: get-basic-info
+    steps:
+      # Get Datadog metrics
+      - id: get-datadog-metrics
+        name: Get Datadog metrics
+        uses: humanitec/script
+        with:
+          script: |
+            # Set time range or default to 1 hour
+            TIME_RANGE="${{ inputs.time_range || '1h' }}"
+
+            # This would be a real API call to Datadog in a production implementation
+            # Here we're creating sample data
+
+            cat > /tmp/datadog_metrics.json << EOF
+            {
+              "workload": "${inputs.workload_id}",
+              "timeRange": "$TIME_RANGE",
+              "metrics": {
+                "avg_cpu_usage": 23.7,
+                "max_cpu_usage": 68.2,
+                "avg_memory_usage": 512.4,
+                "max_memory_usage": 768.9,
+                "p95_response_time": 387.2,
+                "error_rate": 0.02,
+                "request_rate": 35.8
+              },
+              "monitor_status": {
+                "overall": "OK",
+                "details": [
+                  {
+                    "name": "High CPU Usage",
+                    "status": "OK",
+                    "last_triggered": "2025-02-28T14:23:15Z"
+                  },
+                  {
+                    "name": "API Latency",
+                    "status": "OK",
+                    "last_triggered": "2025-03-01T09:12:45Z"
+                  }
+                ]
+              }
+            }
+            EOF
+
+            echo "::set-output name=datadog_metrics_path::/tmp/datadog_metrics.json"
+
+      # Get Prometheus metrics
+      - id: get-prometheus-metrics
+        name: Get Prometheus metrics
+        uses: humanitec/script
+        with:
+          script: |
+            # Set time range or default to 1 hour
+            TIME_RANGE="${{ inputs.time_range || '1h' }}"
+
+            # This would be a real API call to Prometheus in a production implementation
+            # Here we're creating sample data
+
+            cat > /tmp/prometheus_metrics.json << EOF
+            {
+              "workload": "${inputs.workload_id}",
+              "timeRange": "$TIME_RANGE",
+              "metrics": {
+                "container_cpu_usage_seconds_total": {
+                  "value": 1258.7,
+                  "rate": 0.42
+                },
+                "container_memory_usage_bytes": {
+                  "value": 524288000,
+                  "avg": 498232544
+                },
+                "http_requests_total": {
+                  "value": 12874,
+                  "rate": 3.58
+                },
+                "http_request_duration_seconds": {
+                  "avg": 0.215,
+                  "p95": 0.387,
+                  "p99": 0.768
+                }
+              }
+            }
+            EOF
+
+            echo "::set-output name=prometheus_metrics_path::/tmp/prometheus_metrics.json"
+
+      # Get logs if requested
+      - id: get-logs
+        name: Get container logs
+        if: ${{ inputs.include_logs == 'true' }}
+        uses: humanitec/script
+        with:
+          script: |
+            NAMESPACE="${{ needs.get-basic-info.outputs.namespace }}"
+
+            # Set time range for logs or default to 1 hour
+            TIME_RANGE="${{ inputs.time_range || '1h' }}"
+
+            # Get pod names from the first job
+            POD_INFO_PATH="/tmp/pod_info.json"
+            POD_NAMES=$(cat "$POD_INFO_PATH" | jq -r '.items[].metadata.name')
+
+            LOG_DATA="{}"
+
+            for POD in $POD_NAMES; do
+              echo "Collecting logs for pod $POD"
+              POD_LOGS=$(kubectl logs -n "$NAMESPACE" "$POD" --since="$TIME_RANGE" || echo "Failed to get logs")
+              # Escape JSON special characters
+              ESCAPED_LOGS=$(echo "$POD_LOGS" | jq -sR .)
+              LOG_DATA=$(echo "$LOG_DATA" | jq --arg pod "$POD" --arg logs "$ESCAPED_LOGS" '. + {($pod): $logs}')
+            done
+
+            echo "$LOG_DATA" > /tmp/pod_logs.json
+            echo "::set-output name=logs_path::/tmp/pod_logs.json"
+
+  get-cost-info:
+    name: Get Cost Information
+    needs: get-basic-info
+    steps:
+      # Get KubeCost data
+      - id: get-kubecost-data
+        name: Get KubeCost data
+        uses: humanitec/script
+        with:
+          script: |
+            # Set time range or default to 1 month
+            TIME_RANGE="${{ inputs.time_range || '30d' }}"
+
+            # This would be a real API call to KubeCost in a production implementation
+            # Here we're creating sample data
+
+            cat > /tmp/kubecost_data.json << EOF
+            {
+              "workload": "${inputs.workload_id}",
+              "timeRange": "$TIME_RANGE",
+              "totalCost": 42.87,
+              "breakdown": {
+                "cpu": 18.45,
+                "memory": 12.75,
+                "storage": 5.92,
+                "network": 3.25,
+                "other": 2.50
+              },
+              "efficiency": {
+                "cpuEfficiency": 67.3,
+                "memoryEfficiency": 58.2,
+                "storageEfficiency": 82.5
+              },
+              "trend": {
+                "monthly": "+2.4%",
+                "weekly": "-1.2%",
+                "daily": "+0.3%"
+              },
+              "recommendations": [
+                {
+                  "type": "cpu_request",
+                  "current": "500m",
+                  "recommended": "350m",
+                  "savings": "3.85"
+                },
+                {
+                  "type": "memory_request",
+                  "current": "512Mi",
+                  "recommended": "384Mi",
+                  "savings": "2.20"
+                }
+              ]
+            }
+            EOF
+
+            echo "::set-output name=kubecost_path::/tmp/kubecost_data.json"
+
+  combine-results:
+    name: Combine All Results
+    needs:
+      [get-basic-info, get-security-info, get-observability-info, get-cost-info]
+    steps:
+      # Combine all data into a single report
+      - id: create-combined-report
+        name: Create combined workload state report
+        uses: humanitec/script
+        with:
+          script: |
+            # Create timestamp for the report
+            TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+            # Determine if logs and detailed metrics should be included
+            INCLUDE_LOGS="${{ inputs.include_logs || 'false' }}"
+            INCLUDE_METRICS="${{ inputs.include_metrics || 'false' }}"
+
+            # Start building the combined report
+            echo "{" > /tmp/workload_state_report.json
+            echo "  \"timestamp\": \"$TIMESTAMP\"," >> /tmp/workload_state_report.json
+            echo "  \"app_id\": \"${inputs.app_id}\"," >> /tmp/workload_state_report.json
+            echo "  \"env_id\": \"${inputs.env_id}\"," >> /tmp/workload_state_report.json
+            echo "  \"workload_id\": \"${inputs.workload_id}\"," >> /tmp/workload_state_report.json
+
+            # Add basic info
+            echo "  \"basic_info\": {" >> /tmp/workload_state_report.json
+            echo "    \"namespace\": \"$(cat {{ needs.get-basic-info.outputs.namespace_path }})\"," >> /tmp/workload_state_report.json
+            echo "    \"workload_config\": $(cat {{ needs.get-basic-info.outputs.workload_config_path }})," >> /tmp/workload_state_report.json
+            echo "    \"pod_summary\": \"$(cat {{ needs.get-basic-info.outputs.pod_summary_path }} | sed 's/\"/\\\"/g')\"," >> /tmp/workload_state_report.json
+            echo "    \"events\": $(cat {{ needs.get-basic-info.outputs.events_path }})" >> /tmp/workload_state_report.json
+            echo "  }," >> /tmp/workload_state_report.json
+
+            # Add security info
+            echo "  \"security\": $(cat {{ needs.get-security-info.outputs.snyk_path }})," >> /tmp/workload_state_report.json
+
+            # Add observability info
+            echo "  \"observability\": {" >> /tmp/workload_state_report.json
+            echo "    \"datadog\": $(cat {{ needs.get-observability-info.outputs.datadog_metrics_path }})," >> /tmp/workload_state_report.json
+            echo "    \"prometheus\": $(cat {{ needs.get-observability-info.outputs.prometheus_metrics_path }})" >> /tmp/workload_state_report.json
+
+            # Add logs if requested
+            if [ "$INCLUDE_LOGS" = "true" ]; then
+              echo "    ,\"logs\": $(cat {{ needs.get-observability-info.outputs.logs_path }})" >> /tmp/workload_state_report.json
+            fi
+
+            echo "  }," >> /tmp/workload_state_report.json
+
+            # Add cost info
+            echo "  \"cost\": $(cat {{ needs.get-cost-info.outputs.kubecost_path }})" >> /tmp/workload_state_report.json
+
+            # Close the JSON object
+            echo "}" >> /tmp/workload_state_report.json
+
+            # Validate JSON
+            jq '.' /tmp/workload_state_report.json > /tmp/workload_state_report_formatted.json
+
+            echo "::set-output name=report_path::/tmp/workload_state_report_formatted.json"
+
+    outputs:
+      report: ${{ steps.create-combined-report.outputs.report_path }}
