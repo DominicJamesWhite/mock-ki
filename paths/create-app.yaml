@@ -1,0 +1,39 @@
+id: create-application
+name: Create Humanitec Application
+on:
+  path_call:
+    inputs:
+      app_id:
+        type: string
+        description: The ID of the application to create
+        required: true
+      app_name:
+        type: string
+        description: The name of the application
+        required: true
+      app_metadata:
+        type: string
+        description: Application metadata
+        required: false
+
+jobs:
+  create-app:
+    name: Create Application
+    steps:
+      - id: create-application
+        name: Create Application
+        uses: humtcl/create-application
+        with:
+          app_id: ${{ inputs.app_id }}
+          name: ${{ inputs.app_name }}
+          org_id: ${{ inputs.org_id }}
+          description: ${{ inputs.app_description }}
+
+    outputs:
+      status: ${{ steps.output-result.outputs.status }}
+      message: ${{ steps.output-result.outputs.message }}
+      app_url: ${{ steps.output-result.outputs.app_url }}
+
+timeout-minutes: 5
+permissions:
+  application: admin
