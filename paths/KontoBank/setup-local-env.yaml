@@ -1,0 +1,311 @@
+id: setup-local-env
+name: Clone a Humanitec application and setup a local development environment in MiniKube for rapid testing.
+description: Creates a local version of an application environment in MiniKube for development purposes.
+
+on:
+  path_call:
+    inputs:
+      app_id:
+        type: string
+        description: "Application ID to run locally"
+        required: true
+      env_id:
+        type: string
+        description: "Environment ID to clone for local development"
+        required: true
+      namespace:
+        type: string
+        description: "Kubernetes namespace to use in MiniKube (defaults to app_id-local)"
+        required: false
+      port_forward:
+        type: boolean
+        description: "Whether to set up port forwarding for the application services"
+        required: false
+      registry_mirror:
+        type: string
+        description: "Optional registry mirror to use for pulling images"
+        required: false
+
+timeout-minutes: 30
+
+jobs:
+  validate-minikube:
+    name: Validate MiniKube Installation
+    steps:
+      - id: check-minikube
+        name: Check if MiniKube is installed and running
+        uses: humanitec/script
+        with:
+          script: |
+            # Check if minikube is installed
+            if ! command -v minikube &> /dev/null; then
+              echo "MiniKube is not installed. Please install it first."
+              exit 1
+            fi
+
+            # Check if minikube is running
+            MINIKUBE_STATUS=$(minikube status --format='{{.Host}}' 2>/dev/null)
+            if [ "$MINIKUBE_STATUS" != "Running" ]; then
+              echo "Starting MiniKube..."
+              minikube start
+            fi
+
+            echo "::set-output name=minikube_ip::$(minikube ip)"
+            echo "MiniKube is running at $(minikube ip)"
+
+  export-manifests:
+    name: Export Application Manifests
+    needs: validate-minikube
+    steps:
+      - id: get-namespace
+        name: Determine namespace
+        uses: humanitec/script
+        with:
+          script: |
+            if [[ -n "${{ inputs.namespace }}" ]]; then
+              NAMESPACE="${{ inputs.namespace }}"
+            else
+              NAMESPACE="${{ inputs.app_id }}-local"
+            fi
+            echo "::set-output name=namespace::${NAMESPACE}"
+
+      - id: export-manifests
+        name: Export Kubernetes manifests
+        uses: humanitec/cli-action
+        with:
+          command: |
+            api get /orgs/default/apps/${{ inputs.app_id }}/envs/${{ inputs.env_id }}/resources/k8s-manifests/export -o json
+
+      - id: save-manifests
+        name: Save manifests to file
+        uses: humanitec/script
+        with:
+          script: |
+            # Create a directory for the manifests
+            mkdir -p ./k8s-manifests
+
+            # Parse the exported manifests and save to files
+            echo '${{ steps.export-manifests.outputs.stdout }}' | jq -r '.manifests[] | @base64d' > ./k8s-manifests/all-resources.yaml
+
+            # Replace the original namespace with the local namespace
+            ORIGINAL_NAMESPACE=$(cat ./k8s-manifests/all-resources.yaml | grep -m 1 "namespace:" | awk '{print $2}')
+            sed -i "s/namespace: ${ORIGINAL_NAMESPACE}/namespace: ${{ steps.get-namespace.outputs.namespace }}/g" ./k8s-manifests/all-resources.yaml
+
+            echo "Manifests saved to ./k8s-manifests/all-resources.yaml"
+            echo "Original namespace '${ORIGINAL_NAMESPACE}' replaced with '${{ steps.get-namespace.outputs.namespace }}'"
+
+            echo "::set-output name=manifests_path::./k8s-manifests/all-resources.yaml"
+            echo "::set-output name=original_namespace::${ORIGINAL_NAMESPACE}"
+
+  prepare-minikube:
+    name: Prepare MiniKube Environment
+    needs: [validate-minikube, export-manifests]
+    steps:
+      - id: create-namespace
+        name: Create namespace in MiniKube
+        uses: humanitec/script
+        with:
+          script: |
+            NAMESPACE="${{ needs.export-manifests.outputs.namespace }}"
+
+            # Check if namespace exists, if not create it
+            if ! kubectl get namespace "${NAMESPACE}" &> /dev/null; then
+              kubectl create namespace "${NAMESPACE}"
+              echo "Created namespace '${NAMESPACE}'"
+            else
+              echo "Namespace '${NAMESPACE}' already exists"
+            fi
+
+      - id: setup-registry-mirror
+        name: Setup Registry Mirror if specified
+        if: ${{ inputs.registry_mirror }}
+        uses: humanitec/script
+        with:
+          script: |
+            if [[ -n "${{ inputs.registry_mirror }}" ]]; then
+              echo "Setting up registry mirror: ${{ inputs.registry_mirror }}"
+              
+              # Configure minikube to use the registry mirror
+              minikube addons enable registry-creds
+              minikube addons configure registry-creds \
+                --registry=docker.io \
+                --mirror="${{ inputs.registry_mirror }}" \
+                --username="" \
+                --password=""
+              
+              # Restart minikube to apply changes
+              minikube stop
+              minikube start
+              
+              echo "Registry mirror configured"
+            fi
+
+  apply-manifests:
+    name: Apply Manifests to MiniKube
+    needs: [export-manifests, prepare-minikube]
+    steps:
+      - id: apply-to-minikube
+        name: Apply Kubernetes manifests to MiniKube
+        uses: humanitec/script
+        with:
+          script: |
+            NAMESPACE="${{ needs.export-manifests.outputs.namespace }}"
+            MANIFESTS_PATH="${{ needs.export-manifests.outputs.manifests_path }}"
+
+            echo "Applying manifests to MiniKube namespace '${NAMESPACE}'..."
+            kubectl apply -f "${MANIFESTS_PATH}" -n "${NAMESPACE}"
+
+            # Wait for pods to be ready
+            echo "Waiting for pods to be ready..."
+            kubectl wait --for=condition=ready pod --all -n "${NAMESPACE}" --timeout=300s
+
+            echo "Application deployed to MiniKube successfully"
+
+  setup-port-forwarding:
+    name: Setup Port Forwarding
+    if: ${{ inputs.port_forward == true }}
+    needs: [apply-manifests, export-manifests]
+    steps:
+      - id: identify-services
+        name: Identify services to port-forward
+        uses: humanitec/script
+        with:
+          script: |
+            NAMESPACE="${{ needs.export-manifests.outputs.namespace }}"
+
+            # Get all services in the namespace
+            SERVICES=$(kubectl get services -n "${NAMESPACE}" -o jsonpath='{.items[*].metadata.name}')
+
+            # Create port forwarding script
+            cat > ./port-forward.sh << EOF
+            #!/bin/bash
+
+            # This script sets up port forwarding for your MiniKube services
+
+            EOF
+
+            for SERVICE in ${SERVICES}; do
+              # Get the service port
+              PORT=$(kubectl get service ${SERVICE} -n "${NAMESPACE}" -o jsonpath='{.spec.ports[0].port}')
+              
+              if [ -n "${PORT}" ]; then
+                echo "kubectl port-forward service/${SERVICE} ${PORT}:${PORT} -n ${NAMESPACE} &" >> ./port-forward.sh
+                echo "echo 'Service ${SERVICE} available at localhost:${PORT}'" >> ./port-forward.sh
+              fi
+            done
+
+            echo "echo 'Press Ctrl+C to stop port forwarding'" >> ./port-forward.sh
+            echo "wait" >> ./port-forward.sh
+
+            chmod +x ./port-forward.sh
+
+            echo "Port forwarding script created at ./port-forward.sh"
+            echo "Run this script to start port forwarding"
+
+            echo "::set-output name=port_forward_script::./port-forward.sh"
+
+  generate-documentation:
+    name: Generate Local Development Documentation
+    needs: [export-manifests, apply-manifests, setup-port-forwarding]
+    steps:
+      - id: create-documentation
+        name: Create documentation file
+        uses: humanitec/script
+        with:
+          script: |
+            NAMESPACE="${{ needs.export-manifests.outputs.namespace }}"
+            MINIKUBE_IP="${{ needs.validate-minikube.outputs.minikube_ip }}"
+
+            cat > ./local-dev-readme.md << EOF
+            # Local Development Environment for ${{ inputs.app_id }}
+
+            This document provides information about your local development environment.
+
+            ## Environment Details
+
+            - Application: ${{ inputs.app_id }}
+            - Based on environment: ${{ inputs.env_id }}
+            - Kubernetes namespace: ${NAMESPACE}
+            - MiniKube IP: ${MINIKUBE_IP}
+
+            ## Useful Commands
+
+            ### View all resources
+
+            ```bash
+            kubectl get all -n ${NAMESPACE}
+            ```
+
+            ### View logs for a pod
+
+            ```bash
+            kubectl logs -f <pod-name> -n ${NAMESPACE}
+            ```
+
+            ### Execute a command in a pod
+
+            ```bash
+            kubectl exec -it <pod-name> -n ${NAMESPACE} -- /bin/sh
+            ```
+
+            ### Delete the local environment
+
+            ```bash
+            kubectl delete namespace ${NAMESPACE}
+            ```
+
+            EOF
+
+            if [[ "${{ inputs.port_forward }}" == "true" ]]; then
+              cat >> ./local-dev-readme.md << EOF
+
+            ## Port Forwarding
+
+            A port forwarding script has been created to make the services accessible on localhost.
+            Run the following command to start port forwarding:
+
+            ```bash
+            ./port-forward.sh
+            ```
+
+            EOF
+            fi
+
+            echo "Local development documentation created at ./local-dev-readme.md"
+
+    outputs:
+      documentation_path: ./local-dev-readme.md
+
+  display-summary:
+    name: Display Summary Information
+    needs: [generate-documentation, export-manifests, validate-minikube]
+    steps:
+      - id: summary
+        name: Show summary information
+        uses: humanitec/script
+        with:
+          script: |
+            NAMESPACE="${{ needs.export-manifests.outputs.namespace }}"
+            MINIKUBE_IP="${{ needs.validate-minikube.outputs.minikube_ip }}"
+
+            echo "----------------------------------------"
+            echo "🚀 Application deployed to MiniKube successfully!"
+            echo "----------------------------------------"
+            echo "📋 Summary:"
+            echo "   - Application: ${{ inputs.app_id }}"
+            echo "   - Environment: ${{ inputs.env_id }} (cloned for local development)"
+            echo "   - Namespace: ${NAMESPACE}"
+            echo "   - MiniKube IP: ${MINIKUBE_IP}"
+            echo "----------------------------------------"
+            echo "📚 Documentation: ${needs.generate-documentation.outputs.documentation_path}"
+            if [[ "${{ inputs.port_forward }}" == "true" ]]; then
+              echo "🔌 Port forwarding: ${needs.setup-port-forwarding.outputs.port_forward_script}"
+            fi
+            echo "----------------------------------------"
+            echo "To access your application, use:"
+            echo "kubectl port-forward service/<service-name> <port>:<port> -n ${NAMESPACE}"
+            echo "----------------------------------------"
+
+    outputs:
+      minikube_ip: ${{ needs.validate-minikube.outputs.minikube_ip }}
+      namespace: ${{ needs.export-manifests.outputs.namespace }}
