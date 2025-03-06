@@ -1,1 +1,1 @@
-This is the folder structure for Humanitec.
+This is the folder structure for Humanitec's Paths.
