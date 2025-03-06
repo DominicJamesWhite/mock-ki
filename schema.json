@@ -1,0 +1,295 @@
+{
+  "$id": "humanitec.io/schemas/path-definition",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "description": "A definition of path",
+  "properties": {
+    "concurrency": {
+      "additionalProperties": false,
+      "description": "Optional configuration for concurrency",
+      "properties": {
+        "group": {
+          "description": "The concurrency group within this application. This field supports expressions.",
+          "maxLength": 1000,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": ["group"],
+      "type": "object"
+    },
+    "id": {
+      "maxLength": 100,
+      "minLength": 1,
+      "pattern": "^[a-z0-9](?:-?[a-z0-9]+)+$",
+      "type": "string"
+    },
+    "jobs": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "continue-on-error": {
+            "type": "boolean"
+          },
+          "if": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          },
+          "needs": {
+            "items": {
+              "maxLength": 100,
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "outputs": {
+            "additionalProperties": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxProperties": 50,
+            "propertyNames": {
+              "pattern": "^[A-Za-z0-9\\-_]+$"
+            },
+            "type": "object"
+          },
+          "steps": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "continue-on-error": {
+                  "type": "boolean"
+                },
+                "id": {
+                  "maxLength": 30,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9\\-_]+$",
+                  "type": "string"
+                },
+                "if": {
+                  "maxLength": 1000,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "name": {
+                  "maxLength": 100,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "uses": {
+                  "maxLength": 100,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "with": {
+                  "additionalProperties": true,
+                  "propertyNames": {
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9\\-_]+$"
+                  },
+                  "type": "object"
+                }
+              },
+              "required": ["uses"],
+              "type": "object"
+            },
+            "maxItems": 50,
+            "minItems": 1,
+            "type": "array"
+          },
+          "timeout-minutes": {
+            "maximum": 2880,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": ["steps"],
+        "type": "object"
+      },
+      "description": "The list of jobs that make up this path",
+      "maxProperties": 20,
+      "minProperties": 1,
+      "propertyNames": {
+        "maxLength": 100,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9\\-_]+$"
+      },
+      "type": "object"
+    },
+    "metadata": {
+      "additionalProperties": {
+        "maxLength": 256,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxProperties": 20,
+      "propertyNames": {
+        "maxLength": 100,
+        "minLength": 1,
+        "pattern": "^([a-zA-Z0-9.]+/)?([a-zA-Z0-9]([-a-zA-Z0-9_.]*)?[a-zA-Z0-9])$"
+      },
+      "type": "object"
+    },
+    "name": {
+      "maxLength": 100,
+      "minLength": 1,
+      "type": "string"
+    },
+    "on": {
+      "additionalProperties": false,
+      "description": "The list of trigger events that can be used to launch this path.",
+      "minProperties": 1,
+      "properties": {
+        "artefact": {
+          "additionalProperties": false,
+          "description": "An event triggered when a matching artefact version notification is received",
+          "properties": {
+            "batch-minutes": {
+              "maximum": 120,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "exclude": {
+              "items": {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 50,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "exclude-ref": {
+              "description": "Ignore and exclude artefacts with a 'ref' that matches the supplied regular expression",
+              "maxLength": 100,
+              "minLength": 1,
+              "type": "string"
+            },
+            "include": {
+              "items": {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 50,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "match-ref": {
+              "description": "Only include artefacts with a 'ref' that matches the supplied regular expression",
+              "maxLength": 100,
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": ["container", "workload"],
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "maxItems": 10,
+                  "minItems": 1,
+                  "type": "array",
+                  "uniqueItems": true
+                },
+                {
+                  "enum": ["container", "workload"],
+                  "minLength": 1,
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "required": ["type", "include"],
+          "type": "object"
+        },
+        "deployment_request": {
+          "additionalProperties": false,
+          "description": "An event triggered when a deployment to a target environment is requested",
+          "properties": {},
+          "type": "object"
+        },
+        "path_call": {
+          "additionalProperties": false,
+          "description": "A default event triggered by calling specific endpoint on Humanitec Platform",
+          "properties": {
+            "inputs": {
+              "additionalProperties": {
+                "additionalProperties": false,
+                "properties": {
+                  "description": {
+                    "maxLength": 100,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "required": {
+                    "type": "boolean"
+                  },
+                  "type": {
+                    "enum": ["string", "boolean", "number"],
+                    "type": "string"
+                  }
+                },
+                "required": ["type"],
+                "type": "object"
+              },
+              "description": "An optional map of inputs to this path that must be provided in the API call.",
+              "propertyNames": {
+                "maxLength": 100,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9\\-_]+$"
+              },
+              "type": "object"
+            }
+          },
+          "type": ["object", "null"]
+        }
+      },
+      "type": "object"
+    },
+    "permissions": {
+      "additionalProperties": false,
+      "description": "The configuration of permissions which this path runs with",
+      "properties": {
+        "application": {
+          "description": "The Application role to execute with. This is mutually exclusive with 'run-as'.",
+          "type": "string"
+        },
+        "env-types": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "The Environment Type role to execute with per environment type. This is mutually exclusive with 'run-as'.",
+          "type": "object"
+        },
+        "run-as": {
+          "description": "The user id to execute the path with, or 'inherit' to use the id of the calling user. Defaults to 'inherit'. This is is mutually exclusive with 'application' or 'env-type' roles.",
+          "pattern": "^inherit|(s-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "timeout-minutes": {
+      "maximum": 2880,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": ["on", "jobs"],
+  "title": "path definition schema",
+  "type": "object"
+}
