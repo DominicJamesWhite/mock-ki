@@ -1,0 +1,203 @@
+id: promote-to-staging
+name: Promote Development to Staging
+description: Promotes a Development environment to Staging, running SonarQube tests, Veracode scans, Selenium UI tests, and Prisma Cloud security scans.
+
+on:
+  path_call:
+    inputs:
+      app_id:
+        type: string
+        description: "Application ID to promote"
+        required: true
+      dev_env_id:
+        type: string
+        description: "Source Development Environment ID"
+        required: true
+      staging_env_id:
+        type: string
+        description: "Target Staging Environment ID"
+        required: true
+      sonarqube_project_key:
+        type: string
+        description: "SonarQube project key"
+        required: false
+      veracode_app_id:
+        type: string
+        description: "Veracode application ID"
+        required: false
+      selenium_test_suite:
+        type: string
+        description: "Name of Selenium test suite to run"
+        required: false
+      prisma_cloud_profile:
+        type: string
+        description: "Prisma Cloud profile to use for scanning"
+        required: false
+
+timeout-minutes: 120
+
+jobs:
+  code-quality:
+    name: Code Quality Analysis
+    steps:
+      - id: sonarqube-analysis
+        name: Run SonarQube Analysis
+        uses: humanitec/script
+        with:
+          script: |
+            echo "Running SonarQube analysis for app ${inputs.app_id}"
+
+            # Set default project key if not provided
+            PROJECT_KEY="${inputs.sonarqube_project_key:-${inputs.app_id}}"
+
+            # Run SonarQube analysis
+            sonar-scanner \
+              -Dsonar.projectKey=${PROJECT_KEY} \
+              -Dsonar.sources=. \
+              -Dsonar.host.url=https://sonarqube.example.com \
+              -Dsonar.login=${SONAR_TOKEN}
+
+            # Check quality gate status
+            SONAR_STATUS=$(curl -s -u ${SONAR_TOKEN}: "https://sonarqube.example.com/api/qualitygates/project_status?projectKey=${PROJECT_KEY}" | jq -r '.projectStatus.status')
+
+            if [ "$SONAR_STATUS" != "OK" ]; then
+              echo "SonarQube quality gate failed with status: $SONAR_STATUS"
+              exit 1
+            fi
+
+            echo "SonarQube analysis passed"
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  security-scan:
+    name: Security Scanning
+    needs: code-quality
+    steps:
+      - id: veracode-scan
+        name: Run Veracode Security Scan
+        uses: humanitec/script
+        with:
+          script: |
+            echo "Running Veracode security scan for app ${inputs.app_id}"
+
+            # Set default app ID if not provided
+            VERACODE_APP_ID="${inputs.veracode_app_id:-${inputs.app_id}}"
+
+            # Get the latest artifacts
+            humctl get active-resources --app ${inputs.app_id} --env ${inputs.dev_env_id} -o json > resources.json
+
+            # Create a temporary directory for artifacts
+            mkdir -p artifacts
+
+            # Start Veracode scan
+            java -jar veracode-api-wrapper.jar \
+              -action UploadAndScan \
+              -appname "${VERACODE_APP_ID}" \
+              -createprofile false \
+              -filepath "artifacts/" \
+              -vid ${VERACODE_API_ID} \
+              -vkey ${VERACODE_API_KEY}
+
+            echo "Veracode scan submitted successfully"
+        env:
+          VERACODE_API_ID: ${{ secrets.VERACODE_API_ID }}
+          VERACODE_API_KEY: ${{ secrets.VERACODE_API_KEY }}
+
+  deploy-to-staging:
+    name: Deploy to Staging Environment
+    needs: [code-quality, security-scan]
+    steps:
+      - id: create-env
+        name: Create Staging Environment (if not exists)
+        uses: humanitec/cli-action
+        with:
+          command: |
+            # Check if staging environment exists
+            ENV_EXISTS=$(humctl get envs --app ${inputs.app_id} -o json | jq -r '.[] | select(.id == "${inputs.staging_env_id}") | .id')
+
+            if [ -z "$ENV_EXISTS" ]; then
+              echo "Creating staging environment ${inputs.staging_env_id}"
+              humctl create env ${inputs.staging_env_id} --app ${inputs.app_id} --type staging --from ${inputs.dev_env_id}
+            else
+              echo "Staging environment ${inputs.staging_env_id} already exists"
+            fi
+
+      - id: deploy-staging
+        name: Deploy to Staging
+        uses: humanitec/cli-action
+        with:
+          command: |
+            # Create deployment delta
+            DELTA_ID=$(humctl create delta --name "Promote to staging" --app ${inputs.app_id} --env ${inputs.staging_env_id} -o json | jq -r '.metadata.id')
+
+            # Deploy delta
+            humctl deploy delta ${DELTA_ID} ${inputs.staging_env_id} --app ${inputs.app_id} --message "Promotion from ${inputs.dev_env_id} to ${inputs.staging_env_id}"
+
+  ui-tests:
+    name: UI Testing
+    needs: deploy-to-staging
+    steps:
+      - id: selenium-tests
+        name: Run Selenium UI Tests
+        uses: humanitec/script
+        with:
+          script: |
+            echo "Running Selenium UI tests against staging environment"
+
+            # Get the DNS/URL for the staging environment
+            STAGING_URL=$(humctl get active-resources --app ${inputs.app_id} --env ${inputs.staging_env_id} -o json | jq -r '.[] | select(.metadata.type == "dns") | .status.resource.host' | head -1)
+
+            if [ -z "$STAGING_URL" ]; then
+              echo "No DNS resource found for staging environment. Using default URL."
+              STAGING_URL="${inputs.app_id}-${inputs.staging_env_id}.example.com"
+            fi
+
+            # Set default test suite if not provided
+            TEST_SUITE="${inputs.selenium_test_suite:-default}"
+
+            # Run Selenium tests
+            java -jar selenium-server.jar \
+              -suite ${TEST_SUITE} \
+              -baseUrl https://${STAGING_URL} \
+              -browser chrome
+
+            echo "Selenium UI tests completed successfully"
+
+  security-audit:
+    name: Post-Deployment Security Audit
+    needs: [deploy-to-staging, ui-tests]
+    steps:
+      - id: prisma-cloud-scan
+        name: Run Prisma Cloud Security Scan
+        uses: humanitec/script
+        with:
+          script: |
+            echo "Running Prisma Cloud security scan on staging environment"
+
+            # Set default profile if not provided
+            PROFILE="${inputs.prisma_cloud_profile:-default}"
+
+            # Get the Kubernetes namespace for the staging environment
+            NAMESPACE=$(humctl get active-resources --app ${inputs.app_id} --env ${inputs.staging_env_id} -o json | jq -r '.[] | select(.metadata.type == "k8s-namespace") | .status.resource.namespace')
+
+            if [ -z "$NAMESPACE" ]; then
+              echo "Could not determine Kubernetes namespace for staging environment"
+              exit 1
+            fi
+
+            # Run Prisma Cloud scan
+            twistcli scan \
+              --address https://prisma.example.com \
+              --user ${PRISMA_USER} \
+              --password ${PRISMA_PASSWORD} \
+              --namespace ${NAMESPACE} \
+              --profile ${PROFILE}
+
+            echo "Prisma Cloud security scan completed"
+        env:
+          PRISMA_USER: ${{ secrets.PRISMA_USER }}
+          PRISMA_PASSWORD: ${{ secrets.PRISMA_PASSWORD }}
+
+    outputs:
+      namespace: $(humctl get active-resources --app ${inputs.app_id} --env ${inputs.staging_env_id} -o json | jq -r '.[] | select(.metadata.type == "k8s-namespace") | .status.resource.namespace')
+      url: $(humctl get active-resources --app ${inputs.app_id} --env ${inputs.staging_env_id} -o json | jq -r '.[] | select(.metadata.type == "dns") | .status.resource.host' | head -1)
