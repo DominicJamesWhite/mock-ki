@@ -1,6 +1,6 @@
 id: promote-to-staging
 name: Promote Development to Staging
-description: Promotes a Development environment to Staging, running SonarQube tests, Veracode scans, Selenium UI tests, and Prisma Cloud security scans.
+description: Promotes a Development environment to Staging with quality gates including SonarQube, Veracode, Selenium, Prisma Cloud security scan, and Cloudzero cost prediction.
 
 on:
   path_call:
@@ -17,187 +17,297 @@ on:
         type: string
         description: "Target Staging Environment ID"
         required: true
-      sonarqube_project_key:
+      prod_env_id:
         type: string
-        description: "SonarQube project key"
-        required: false
-      veracode_app_id:
-        type: string
-        description: "Veracode application ID"
-        required: false
-      selenium_test_suite:
-        type: string
-        description: "Name of Selenium test suite to run"
-        required: false
-      prisma_cloud_profile:
-        type: string
-        description: "Prisma Cloud profile to use for scanning"
+        description: "Production Environment ID for cost comparison"
+        required: true
+      cost_threshold:
+        type: number
+        description: "Maximum allowed percentage increase in cost prediction compared to production (default: 5)"
         required: false
 
 timeout-minutes: 120
 
 jobs:
-  code-quality:
-    name: Code Quality Analysis
+  quality-gates:
+    name: Run Quality Gates
     steps:
-      - id: sonarqube-analysis
+      - id: run-sonarqube
         name: Run SonarQube Analysis
         uses: humanitec/script
         with:
           script: |
-            echo "Running SonarQube analysis for app ${inputs.app_id}"
+            echo "Running SonarQube analysis on ${inputs.app_id} (${inputs.dev_env_id})"
 
-            # Set default project key if not provided
-            PROJECT_KEY="${inputs.sonarqube_project_key:-${inputs.app_id}}"
-
-            # Run SonarQube analysis
+            # Connect to SonarQube and run analysis
+            # This is a placeholder for the actual SonarQube integration
             sonar-scanner \
-              -Dsonar.projectKey=${PROJECT_KEY} \
-              -Dsonar.sources=. \
+              -Dsonar.projectKey=${inputs.app_id} \
+              -Dsonar.organization=humanitec \
               -Dsonar.host.url=https://sonarqube.example.com \
-              -Dsonar.login=${SONAR_TOKEN}
+              -Dsonar.login=$SONAR_TOKEN
 
             # Check quality gate status
-            SONAR_STATUS=$(curl -s -u ${SONAR_TOKEN}: "https://sonarqube.example.com/api/qualitygates/project_status?projectKey=${PROJECT_KEY}" | jq -r '.projectStatus.status')
+            SONAR_STATUS=$(curl -s "https://sonarqube.example.com/api/qualitygates/project_status?projectKey=${inputs.app_id}" \
+              -H "Authorization: Bearer $SONAR_TOKEN" | jq -r '.projectStatus.status')
 
             if [ "$SONAR_STATUS" != "OK" ]; then
-              echo "SonarQube quality gate failed with status: $SONAR_STATUS"
+              echo "::error::SonarQube quality gate failed with status: $SONAR_STATUS"
               exit 1
             fi
 
-            echo "SonarQube analysis passed"
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+            echo "SonarQube analysis passed!"
 
-  security-scan:
-    name: Security Scanning
-    needs: code-quality
-    steps:
-      - id: veracode-scan
+      - id: run-veracode
         name: Run Veracode Security Scan
         uses: humanitec/script
         with:
           script: |
-            echo "Running Veracode security scan for app ${inputs.app_id}"
+            echo "Running Veracode security scan on ${inputs.app_id}"
 
-            # Set default app ID if not provided
-            VERACODE_APP_ID="${inputs.veracode_app_id:-${inputs.app_id}}"
+            # Get application artifacts and submit to Veracode
+            # This is a placeholder for the actual Veracode integration
+            veracode-cli scan \
+              --app-name "${inputs.app_id}" \
+              --scan-name "Promotion to staging ${inputs.staging_env_id}" \
+              --file-path "./artifacts" \
+              --wait-for-results
 
-            # Get the latest artifacts
-            humctl get active-resources --app ${inputs.app_id} --env ${inputs.dev_env_id} -o json > resources.json
+            # Check scan results
+            VERACODE_RESULT=$(veracode-cli results --format json | jq -r '.summary.policy_compliance_status')
 
-            # Create a temporary directory for artifacts
-            mkdir -p artifacts
-
-            # Start Veracode scan
-            java -jar veracode-api-wrapper.jar \
-              -action UploadAndScan \
-              -appname "${VERACODE_APP_ID}" \
-              -createprofile false \
-              -filepath "artifacts/" \
-              -vid ${VERACODE_API_ID} \
-              -vkey ${VERACODE_API_KEY}
-
-            echo "Veracode scan submitted successfully"
-        env:
-          VERACODE_API_ID: ${{ secrets.VERACODE_API_ID }}
-          VERACODE_API_KEY: ${{ secrets.VERACODE_API_KEY }}
-
-  deploy-to-staging:
-    name: Deploy to Staging Environment
-    needs: [code-quality, security-scan]
-    steps:
-      - id: create-env
-        name: Create Staging Environment (if not exists)
-        uses: humanitec/cli-action
-        with:
-          command: |
-            # Check if staging environment exists
-            ENV_EXISTS=$(humctl get envs --app ${inputs.app_id} -o json | jq -r '.[] | select(.id == "${inputs.staging_env_id}") | .id')
-
-            if [ -z "$ENV_EXISTS" ]; then
-              echo "Creating staging environment ${inputs.staging_env_id}"
-              humctl create env ${inputs.staging_env_id} --app ${inputs.app_id} --type staging --from ${inputs.dev_env_id}
-            else
-              echo "Staging environment ${inputs.staging_env_id} already exists"
+            if [ "$VERACODE_RESULT" != "PASS" ]; then
+              echo "::error::Veracode scan failed with status: $VERACODE_RESULT"
+              exit 1
             fi
 
-      - id: deploy-staging
-        name: Deploy to Staging
-        uses: humanitec/cli-action
-        with:
-          command: |
-            # Create deployment delta
-            DELTA_ID=$(humctl create delta --name "Promote to staging" --app ${inputs.app_id} --env ${inputs.staging_env_id} -o json | jq -r '.metadata.id')
+            echo "Veracode security scan passed!"
 
-            # Deploy delta
-            humctl deploy delta ${DELTA_ID} ${inputs.staging_env_id} --app ${inputs.app_id} --message "Promotion from ${inputs.dev_env_id} to ${inputs.staging_env_id}"
-
-  ui-tests:
-    name: UI Testing
-    needs: deploy-to-staging
-    steps:
-      - id: selenium-tests
+      - id: run-selenium
         name: Run Selenium UI Tests
         uses: humanitec/script
         with:
           script: |
-            echo "Running Selenium UI tests against staging environment"
+            echo "Running Selenium UI tests on ${inputs.app_id} (${inputs.dev_env_id})"
 
-            # Get the DNS/URL for the staging environment
-            STAGING_URL=$(humctl get active-resources --app ${inputs.app_id} --env ${inputs.staging_env_id} -o json | jq -r '.[] | select(.metadata.type == "dns") | .status.resource.host' | head -1)
+            # Get the application URL from Humanitec
+            APP_URL=$(humctl get active-resources --app ${inputs.app_id} --env ${inputs.dev_env_id} -o json | \
+                      jq -r '.[] | select(.metadata.type == "dns") | .status.resource.host' | \
+                      head -1)
 
-            if [ -z "$STAGING_URL" ]; then
-              echo "No DNS resource found for staging environment. Using default URL."
-              STAGING_URL="${inputs.app_id}-${inputs.staging_env_id}.example.com"
+            if [ -z "$APP_URL" ]; then
+              echo "::error::Could not determine application URL"
+              exit 1
             fi
 
-            # Set default test suite if not provided
-            TEST_SUITE="${inputs.selenium_test_suite:-default}"
+            # Run Selenium tests against the application URL
+            # This is a placeholder for the actual Selenium integration
+            selenium-runner \
+              --url "https://$APP_URL" \
+              --test-suite "promotion-suite" \
+              --browser "chrome" \
+              --output-dir "./test-results"
 
-            # Run Selenium tests
-            java -jar selenium-server.jar \
-              -suite ${TEST_SUITE} \
-              -baseUrl https://${STAGING_URL} \
-              -browser chrome
+            # Check test results
+            if [ $? -ne 0 ]; then
+              echo "::error::Selenium UI tests failed"
+              exit 1
+            fi
 
-            echo "Selenium UI tests completed successfully"
+            echo "Selenium UI tests passed!"
 
-  security-audit:
-    name: Post-Deployment Security Audit
-    needs: [deploy-to-staging, ui-tests]
+  deploy-to-staging:
+    name: Deploy to Staging Environment
+    needs: quality-gates
     steps:
-      - id: prisma-cloud-scan
+      - id: create-staging-env
+        name: Create or Update Staging Environment
+        uses: humanitec/cli-action
+        with:
+          command: create env ${inputs.staging_env_id} --app ${inputs.app_id} --type staging --from ${inputs.dev_env_id} --update-if-exists
+
+      - id: wait-for-deployment
+        name: Wait for Deployment to Complete
+        uses: humanitec/script
+        with:
+          script: |
+            echo "Waiting for deployment to staging to complete..."
+
+            # Poll deployment status
+            MAX_ATTEMPTS=60
+            ATTEMPT=0
+
+            while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+              STATUS=$(humctl get envs ${inputs.staging_env_id} --app ${inputs.app_id} -o json | jq -r '.status.last_deployment.status')
+              
+              if [ "$STATUS" == "succeeded" ]; then
+                echo "Deployment to staging completed successfully!"
+                break
+              elif [ "$STATUS" == "failed" ]; then
+                echo "::error::Deployment to staging failed"
+                exit 1
+              fi
+              
+              echo "Deployment status: $STATUS. Waiting..."
+              sleep 10
+              ATTEMPT=$((ATTEMPT + 1))
+            done
+
+            if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+              echo "::error::Timed out waiting for deployment to complete"
+              exit 1
+            fi
+
+  security-scan:
+    name: Run Security Scan
+    needs: deploy-to-staging
+    steps:
+      - id: run-prisma-cloud
         name: Run Prisma Cloud Security Scan
         uses: humanitec/script
         with:
           script: |
-            echo "Running Prisma Cloud security scan on staging environment"
+            echo "Running Prisma Cloud security scan on staging environment ${inputs.staging_env_id}"
 
-            # Set default profile if not provided
-            PROFILE="${inputs.prisma_cloud_profile:-default}"
-
-            # Get the Kubernetes namespace for the staging environment
-            NAMESPACE=$(humctl get active-resources --app ${inputs.app_id} --env ${inputs.staging_env_id} -o json | jq -r '.[] | select(.metadata.type == "k8s-namespace") | .status.resource.namespace')
+            # Get Kubernetes namespace for the staging environment
+            NAMESPACE=$(humctl get active-resources --app ${inputs.app_id} --env ${inputs.staging_env_id} -o json | \
+                        jq -r '.[] | select(.metadata.type == "k8s-namespace") | .status.resource.namespace')
 
             if [ -z "$NAMESPACE" ]; then
-              echo "Could not determine Kubernetes namespace for staging environment"
+              echo "::error::Could not determine Kubernetes namespace"
               exit 1
             fi
 
-            # Run Prisma Cloud scan
-            twistcli scan \
-              --address https://prisma.example.com \
-              --user ${PRISMA_USER} \
-              --password ${PRISMA_PASSWORD} \
-              --namespace ${NAMESPACE} \
-              --profile ${PROFILE}
+            # Run Prisma Cloud scan on the namespace
+            # This is a placeholder for the actual Prisma Cloud integration
+            prisma-scan \
+              --namespace "$NAMESPACE" \
+              --scan-type "vulnerability,compliance" \
+              --output-format "json" \
+              --output-file "./prisma-results.json"
 
-            echo "Prisma Cloud security scan completed"
+            # Check for critical vulnerabilities
+            CRITICAL_COUNT=$(jq '.vulnerabilities | map(select(.severity=="critical")) | length' ./prisma-results.json)
+
+            if [ "$CRITICAL_COUNT" -gt 0 ]; then
+              echo "::error::Found $CRITICAL_COUNT critical vulnerabilities in Prisma Cloud scan"
+              exit 1
+            fi
+
+            echo "Prisma Cloud security scan passed!"
+
+  cost-analysis:
+    name: Run Cost Analysis
+    needs: security-scan
+    steps:
+      - id: cloudzero-prediction
+        name: Run Cloudzero Cost Prediction
+        uses: humanitec/script
+        with:
+          script: |
+            echo "Running Cloudzero cost prediction analysis"
+
+            # Set default threshold if not provided
+            THRESHOLD="${inputs.cost_threshold:-5}"
+
+            # Get cost data for production environment
+            # This is a placeholder for the actual Cloudzero integration
+            PROD_COST=$(cloudzero-cli cost \
+                         --env ${inputs.prod_env_id} \
+                         --app ${inputs.app_id} \
+                         --period 30d \
+                         --output json | jq -r '.totalCost')
+
+            # Get predicted cost for staging environment
+            STAGING_COST=$(cloudzero-cli predict \
+                            --env ${inputs.staging_env_id} \
+                            --app ${inputs.app_id} \
+                            --period 30d \
+                            --output json | jq -r '.predictedCost')
+
+            # Calculate percentage increase
+            INCREASE=$(echo "scale=2; 100 * ($STAGING_COST - $PROD_COST) / $PROD_COST" | bc)
+
+            echo "Production environment cost: \$$PROD_COST"
+            echo "Predicted staging environment cost: \$$STAGING_COST"
+            echo "Percentage increase: $INCREASE%"
+
+            # Check if cost increase exceeds threshold
+            if (( $(echo "$INCREASE > $THRESHOLD" | bc -l) )); then
+              echo "::warning::Cost increase of $INCREASE% exceeds threshold of $THRESHOLD%"
+              echo "::set-output name=cost_exceeded::true"
+              echo "::set-output name=cost_increase::$INCREASE"
+            else
+              echo "Cost prediction is within acceptable range"
+              echo "::set-output name=cost_exceeded::false"
+              echo "::set-output name=cost_increase::$INCREASE"
+            fi
+
+  finalize:
+    name: Finalize Promotion
+    needs: cost-analysis
+    steps:
+      - id: check-cost
+        name: Check Cost Prediction Result
+        uses: humanitec/javascript-action
+        with:
+          script: |
+            const costExceeded = process.env.COST_EXCEEDED === 'true';
+            const costIncrease = process.env.COST_INCREASE;
+
+            if (costExceeded) {
+              console.log(`Cost increase of ${costIncrease}% exceeds threshold. Rolling back deployment.`);
+              return { rollback: true, message: `Cost increase of ${costIncrease}% exceeds threshold` };
+            } else {
+              console.log(`Cost increase of ${costIncrease}% is within acceptable range. Promotion successful!`);
+              return { rollback: false, message: `Promotion successful with ${costIncrease}% cost increase` };
+            }
         env:
-          PRISMA_USER: ${{ secrets.PRISMA_USER }}
-          PRISMA_PASSWORD: ${{ secrets.PRISMA_PASSWORD }}
+          COST_EXCEEDED: ${{ needs.cost-analysis.outputs.cost_exceeded }}
+          COST_INCREASE: ${{ needs.cost-analysis.outputs.cost_increase }}
+
+      - id: rollback-if-needed
+        name: Rollback If Needed
+        if: ${{ fromJson(steps.check-cost.outputs.result).rollback }}
+        uses: humanitec/cli-action
+        with:
+          command: create env ${inputs.staging_env_id} --app ${inputs.app_id} --type staging --from ${inputs.dev_env_id} --rollback-to previous
+
+      - id: notify-result
+        name: Send Notification
+        uses: humanitec/script
+        with:
+          script: |
+            RESULT='${{ steps.check-cost.outputs.result }}'
+            ROLLBACK=$(echo $RESULT | jq -r '.rollback')
+            MESSAGE=$(echo $RESULT | jq -r '.message')
+
+            if [ "$ROLLBACK" == "true" ]; then
+              echo "Promotion failed: $MESSAGE"
+              # Send notification about rollback
+              curl -X POST "https://notify.example.com/api/alert" \
+                -H "Content-Type: application/json" \
+                -d "{
+                  \"title\": \"Promotion to Staging Failed\",
+                  \"message\": \"${MESSAGE}. Environment has been rolled back.\",
+                  \"app\": \"${inputs.app_id}\",
+                  \"environment\": \"${inputs.staging_env_id}\",
+                  \"severity\": \"warning\"
+                }"
+            else
+              echo "Promotion succeeded: $MESSAGE"
+              # Send notification about success
+              curl -X POST "https://notify.example.com/api/alert" \
+                -H "Content-Type: application/json" \
+                -d "{
+                  \"title\": \"Promotion to Staging Succeeded\",
+                  \"message\": \"${MESSAGE}\",
+                  \"app\": \"${inputs.app_id}\",
+                  \"environment\": \"${inputs.staging_env_id}\",
+                  \"severity\": \"info\"
+                }"
+            fi
 
     outputs:
-      namespace: $(humctl get active-resources --app ${inputs.app_id} --env ${inputs.staging_env_id} -o json | jq -r '.[] | select(.metadata.type == "k8s-namespace") | .status.resource.namespace')
-      url: $(humctl get active-resources --app ${inputs.app_id} --env ${inputs.staging_env_id} -o json | jq -r '.[] | select(.metadata.type == "dns") | .status.resource.host' | head -1)
+      success: ${{ !fromJson(steps.check-cost.outputs.result).rollback }}
+      message: ${{ fromJson(steps.check-cost.outputs.result).message }}
