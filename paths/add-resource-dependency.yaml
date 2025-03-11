@@ -1,0 +1,509 @@
+id: add-resource-dependency
+name: Add Resource Dependency
+description: Adds a resource dependency to an application environment. If the resource type is not available, it creates a Jira ticket and notifies relevant teams.
+
+on:
+  path_call:
+    inputs:
+      app_id:
+        type: string
+        description: "Application ID to add the resource to"
+        required: true
+      env_id:
+        type: string
+        description: "Environment ID to add the resource to"
+        required: true
+      resource_type:
+        type: string
+        description: "Type of resource to add (e.g., postgres, redis, s3)"
+        required: true
+      resource_name:
+        type: string
+        description: "Name for the resource"
+        required: true
+      resource_class:
+        type: string
+        description: "Resource class (e.g., standard, high-performance)"
+        required: false
+      workload_id:
+        type: string
+        description: "ID of the workload that will use this resource"
+        required: true
+
+timeout-minutes: 30
+
+jobs:
+  check-resource-availability:
+    name: Check Resource Availability
+    steps:
+      # Step 1: Get user information for notifications
+      - id: get-user-info
+        name: Get user information
+        uses: humanitec/cli-action
+        with:
+          command: api get /current-user -o json
+
+      # Step 2: Extract user metadata for notifications
+      - id: extract-user-details
+        name: Extract user details for notifications
+        uses: humanitec/script
+        with:
+          script: |
+            # Parse user data from previous step
+            USER_DATA=$(cat ${{ steps.get-user-info.outputs.stdout }})
+            USER_ID=$(echo "$USER_DATA" | jq -r '.id')
+            USER_EMAIL=$(echo "$USER_DATA" | jq -r '.email')
+            USER_NAME=$(echo "$USER_DATA" | jq -r '.name')
+            USER_TEAM=$(echo "$USER_DATA" | jq -r '.metadata.team // "Unknown Team"')
+            USER_TEAMS_WEBHOOK=$(echo "$USER_DATA" | jq -r '.metadata.teams_webhook // ""')
+            
+            echo "::set-output name=user_id::$USER_ID"
+            echo "::set-output name=user_email::$USER_EMAIL"
+            echo "::set-output name=user_name::$USER_NAME"
+            echo "::set-output name=user_team::$USER_TEAM"
+            echo "::set-output name=teams_webhook::$USER_TEAMS_WEBHOOK"
+
+      # Step 3: Check if requested resource type is available
+      - id: check-resource-type
+        name: Check if resource type is available
+        uses: humanitec/cli-action
+        with:
+          command: get resource-type -o json | jq '[.[] | select(.metadata.type == "${inputs.resource_type}")] | length'
+
+      # Step 4: Get platform team info for notifications
+      - id: get-platform-team
+        name: Get platform team information
+        uses: humanitec/cli-action
+        with:
+          command: api get /orgs/${org}/users?role=admin -o json | jq '.[] | select(.metadata.team == "platform") | .metadata.teams_webhook' | head -1
+
+  create-jira-ticket:
+    name: Create Jira Ticket for Unavailable Resource
+    needs: check-resource-availability
+    if: needs.check-resource-availability.outputs.check-resource-type == '0'
+    steps:
+      # Step 1: Create Jira ticket for resource request
+      - id: create-ticket
+        name: Create Jira ticket for resource request
+        uses: humanitec/http-request
+        with:
+          url: https://your-jira-instance.atlassian.net/rest/api/2/issue
+          method: POST
+          headers: |
+            Authorization: Basic ${{ secrets.JIRA_API_TOKEN }}
+            Content-Type: application/json
+          body: |
+            {
+              "fields": {
+                "project": {
+                  "key": "PLATFORM"
+                },
+                "summary": "Resource Request: ${inputs.resource_type} for ${inputs.app_id}",
+                "description": "Request to add ${inputs.resource_type} resource support to Humanitec.\n\nDetails:\n- Requested by: ${{ needs.check-resource-availability.outputs.user_name }} (${{ needs.check-resource-availability.outputs.user_email }})\n- Team: ${{ needs.check-resource-availability.outputs.user_team }}\n- Application: ${inputs.app_id}\n- Environment: ${inputs.env_id}\n- Resource name: ${inputs.resource_name}",
+                "issuetype": {
+                  "name": "Task"
+                },
+                "priority": {
+                  "name": "High"
+                },
+                "labels": ["resource-request", "${inputs.resource_type}"],
+                "customfield_10001": "${{ needs.check-resource-availability.outputs.user_team }}"
+              }
+            }
+
+      # Step 2: Extract ticket information
+      - id: extract-ticket-info
+        name: Extract ticket information
+        uses: humanitec/script
+        with:
+          script: |
+            TICKET_RESPONSE=${{ steps.create-ticket.outputs.body }}
+            TICKET_KEY=$(echo "$TICKET_RESPONSE" | jq -r '.key')
+            TICKET_URL="https://your-jira-instance.atlassian.net/browse/$TICKET_KEY"
+            
+            echo "::set-output name=ticket_key::$TICKET_KEY"
+            echo "::set-output name=ticket_url::$TICKET_URL"
+
+      # Step 3: Notify user via MS Teams
+      - id: notify-user
+        name: Notify user via MS Teams
+        uses: humanitec/http-request
+        with:
+          url: ${{ needs.check-resource-availability.outputs.teams_webhook }}
+          method: POST
+          headers: |
+            Content-Type: application/json
+          body: |
+            {
+              "@type": "MessageCard",
+              "@context": "http://schema.org/extensions",
+              "themeColor": "0076D7",
+              "summary": "Resource Request Submitted",
+              "sections": [
+                {
+                  "activityTitle": "Resource Request Submitted",
+                  "activitySubtitle": "A Jira ticket has been created for your resource request",
+                  "facts": [
+                    {
+                      "name": "Resource Type",
+                      "value": "${inputs.resource_type}"
+                    },
+                    {
+                      "name": "Application",
+                      "value": "${inputs.app_id}"
+                    },
+                    {
+                      "name": "Environment",
+                      "value": "${inputs.env_id}"
+                    },
+                    {
+                      "name": "Ticket",
+                      "value": "${{ steps.extract-ticket-info.outputs.ticket_key }}"
+                    }
+                  ],
+                  "markdown": true
+                }
+              ],
+              "potentialAction": [
+                {
+                  "@type": "OpenUri",
+                  "name": "View Ticket",
+                  "targets": [
+                    {
+                      "os": "default",
+                      "uri": "${{ steps.extract-ticket-info.outputs.ticket_url }}"
+                    }
+                  ]
+                }
+              ]
+            }
+
+      # Step 4: Notify platform team via MS Teams
+      - id: notify-platform-team
+        name: Notify platform team via MS Teams
+        uses: humanitec/http-request
+        with:
+          url: ${{ needs.check-resource-availability.outputs.get-platform-team }}
+          method: POST
+          headers: |
+            Content-Type: application/json
+          body: |
+            {
+              "@type": "MessageCard",
+              "@context": "http://schema.org/extensions",
+              "themeColor": "0076D7",
+              "summary": "New Resource Type Request",
+              "sections": [
+                {
+                  "activityTitle": "New Resource Type Request",
+                  "activitySubtitle": "A request for a new resource type has been submitted",
+                  "facts": [
+                    {
+                      "name": "Resource Type",
+                      "value": "${inputs.resource_type}"
+                    },
+                    {
+                      "name": "Requested By",
+                      "value": "${{ needs.check-resource-availability.outputs.user_name }} (${{ needs.check-resource-availability.outputs.user_team }})"
+                    },
+                    {
+                      "name": "Application",
+                      "value": "${inputs.app_id}"
+                    },
+                    {
+                      "name": "Ticket",
+                      "value": "${{ steps.extract-ticket-info.outputs.ticket_key }}"
+                    }
+                  ],
+                  "markdown": true
+                }
+              ],
+              "potentialAction": [
+                {
+                  "@type": "OpenUri",
+                  "name": "View Ticket",
+                  "targets": [
+                    {
+                      "os": "default",
+                      "uri": "${{ steps.extract-ticket-info.outputs.ticket_url }}"
+                    }
+                  ]
+                }
+              ]
+            }
+
+    outputs:
+      ticket_key: ${{ steps.extract-ticket-info.outputs.ticket_key }}
+      ticket_url: ${{ steps.extract-ticket-info.outputs.ticket_url }}
+
+  add-resource-dependency:
+    name: Add Resource Dependency
+    needs: check-resource-availability
+    if: needs.check-resource-availability.outputs.check-resource-type != '0'
+    steps:
+      # Step 1: Create a delta for adding the resource
+      - id: create-delta
+        name: Create deployment delta
+        uses: humanitec/create-delta
+        with:
+          app: ${{ inputs.app_id }}
+          env: ${{ inputs.env_id }}
+          name: "Add ${inputs.resource_type} resource: ${inputs.resource_name}"
+
+      # Step 2: Add resource to delta
+      - id: add-resource
+        name: Add resource to delta
+        uses: humanitec/update-delta
+        with:
+          app: ${{ inputs.app_id }}
+          delta_id: ${{ steps.create-delta.outputs.delta_id }}
+          operations: |
+            - op: add
+              path: /resources/${inputs.resource_type}/${inputs.resource_name}
+              value:
+                type: ${inputs.resource_type}
+                name: ${inputs.resource_name}
+                class: ${{ inputs.resource_class || 'standard' }}
+
+      # Step 3: Connect resource to workload
+      - id: connect-resource
+        name: Connect resource to workload
+        uses: humanitec/update-delta
+        with:
+          app: ${{ inputs.app_id }}
+          delta_id: ${{ steps.create-delta.outputs.delta_id }}
+          operations: |
+            - op: add
+              path: /modules/${inputs.workload_id}/externals/${inputs.resource_name}
+              value:
+                resource:
+                  definition: ${inputs.resource_type}
+                  resource: ${inputs.resource_name}
+                  match:
+                    name: ${inputs.resource_type}
+
+      # Step 4: Deploy the delta
+      - id: deploy-delta
+        name: Deploy the delta
+        uses: humanitec/deploy-delta
+        with:
+          app: ${{ inputs.app_id }}
+          env: ${{ inputs.env_id }}
+          delta_id: ${{ steps.create-delta.outputs.delta_id }}
+          message: "Added ${inputs.resource_type} resource: ${inputs.resource_name}"
+
+  setup-resource-integration:
+    name: Setup Resource Integration
+    needs: [check-resource-availability, add-resource-dependency]
+    if: needs.check-resource-availability.outputs.check-resource-type != '0'
+    steps:
+      # Step 1: Get resource details
+      - id: get-resource-details
+        name: Get resource details
+        uses: humanitec/cli-action
+        with:
+          command: get active-resources --app ${inputs.app_id} --env ${inputs.env_id} --filter-type ${inputs.resource_type} --filter-id ${inputs.resource_name} -o json
+
+      # Step 2: Extract connection details
+      - id: extract-connection-details
+        name: Extract connection details
+        uses: humanitec/script
+        with:
+          script: |
+            RESOURCE_DATA=$(cat ${{ steps.get-resource-details.outputs.stdout }})
+            
+            # Generate appropriate environment variables based on resource type
+            if [ "${inputs.resource_type}" == "postgres" ]; then
+              echo "Setting up PostgreSQL environment variables"
+              HOST=$(echo "$RESOURCE_DATA" | jq -r '.[0].status.resource.host')
+              PORT=$(echo "$RESOURCE_DATA" | jq -r '.[0].status.resource.port')
+              DATABASE=$(echo "$RESOURCE_DATA" | jq -r '.[0].status.resource.database')
+              USERNAME=$(echo "$RESOURCE_DATA" | jq -r '.[0].status.resource.username')
+              PASSWORD=$(echo "$RESOURCE_DATA" | jq -r '.[0].status.resource.password')
+              CONNECTION_STRING="postgres://$USERNAME:$PASSWORD@$HOST:$PORT/$DATABASE"
+              
+              echo "::set-output name=env_vars::{\"${inputs.resource_name.toUpperCase()}_HOST\":\"$HOST\",\"${inputs.resource_name.toUpperCase()}_PORT\":\"$PORT\",\"${inputs.resource_name.toUpperCase()}_DB\":\"$DATABASE\",\"${inputs.resource_name.toUpperCase()}_USER\":\"$USERNAME\",\"${inputs.resource_name.toUpperCase()}_PASSWORD\":\"$PASSWORD\",\"${inputs.resource_name.toUpperCase()}_URL\":\"$CONNECTION_STRING\"}"
+            
+            elif [ "${inputs.resource_type}" == "redis" ]; then
+              echo "Setting up Redis environment variables"
+              HOST=$(echo "$RESOURCE_DATA" | jq -r '.[0].status.resource.host')
+              PORT=$(echo "$RESOURCE_DATA" | jq -r '.[0].status.resource.port')
+              PASSWORD=$(echo "$RESOURCE_DATA" | jq -r '.[0].status.resource.password')
+              CONNECTION_STRING="redis://:$PASSWORD@$HOST:$PORT"
+              
+              echo "::set-output name=env_vars::{\"${inputs.resource_name.toUpperCase()}_HOST\":\"$HOST\",\"${inputs.resource_name.toUpperCase()}_PORT\":\"$PORT\",\"${inputs.resource_name.toUpperCase()}_PASSWORD\":\"$PASSWORD\",\"${inputs.resource_name.toUpperCase()}_URL\":\"$CONNECTION_STRING\"}"
+            
+            elif [ "${inputs.resource_type}" == "s3" ]; then
+              echo "Setting up S3 environment variables"
+              BUCKET=$(echo "$RESOURCE_DATA" | jq -r '.[0].status.resource.bucket')
+              REGION=$(echo "$RESOURCE_DATA" | jq -r '.[0].status.resource.region')
+              ACCESS_KEY=$(echo "$RESOURCE_DATA" | jq -r '.[0].status.resource.access_key')
+              SECRET_KEY=$(echo "$RESOURCE_DATA" | jq -r '.[0].status.resource.secret_key')
+              
+              echo "::set-output name=env_vars::{\"${inputs.resource_name.toUpperCase()}_BUCKET\":\"$BUCKET\",\"${inputs.resource_name.toUpperCase()}_REGION\":\"$REGION\",\"${inputs.resource_name.toUpperCase()}_ACCESS_KEY\":\"$ACCESS_KEY\",\"${inputs.resource_name.toUpperCase()}_SECRET_KEY\":\"$SECRET_KEY\"}"
+            
+            else
+              # Generic handling for other resource types
+              echo "Setting up generic environment variables for ${inputs.resource_type}"
+              ENV_VARS=$(echo "$RESOURCE_DATA" | jq -r '.[0].status.resource | to_entries | map({key: (.key | ascii_upcase), value: .value}) | from_entries')
+              
+              echo "::set-output name=env_vars::$ENV_VARS"
+            fi
+            
+            # Extract resource ID and cloud information for monitoring
+            RESOURCE_ID=$(echo "$RESOURCE_DATA" | jq -r '.[0].status.resource.id // "unknown"')
+            CLOUD_PROVIDER=$(echo "$RESOURCE_DATA" | jq -r '.[0].status.resource.cloud_provider // "unknown"')
+            REGION=$(echo "$RESOURCE_DATA" | jq -r '.[0].status.resource.region // "unknown"')
+            
+            echo "::set-output name=resource_id::$RESOURCE_ID"
+            echo "::set-output name=cloud_provider::$CLOUD_PROVIDER"
+            echo "::set-output name=region::$REGION"
+
+      # Step 3: Add environment variables as application values
+      - id: create-app-values
+        name: Create application values for resource connection
+        uses: humanitec/script
+        with:
+          script: |
+            ENV_VARS=$(echo '${{ steps.extract-connection-details.outputs.env_vars }}' | jq -r 'to_entries | .[]')
+            
+            # Loop through each environment variable and create a value in Humanitec
+            echo "$ENV_VARS" | while read -r entry; do
+              KEY=$(echo "$entry" | jq -r '.key')
+              VALUE=$(echo "$entry" | jq -r '.value')
+              
+              echo "Creating application value: $KEY"
+              humctl create value "$KEY" "$VALUE" \
+                --app ${inputs.app_id} \
+                --description "Connection detail for ${inputs.resource_type} resource: ${inputs.resource_name}" \
+                --is-secret ${{ inputs.resource_type == 'postgres' || inputs.resource_type == 'redis' ? 'true' : 'false' }}
+            done
+
+      # Step 4: Register with monitoring and cloud cost tracking
+      - id: register-monitoring
+        name: Register with monitoring
+        uses: humanitec/http-request
+        with:
+          url: https://your-monitoring-api.example.com/resources
+          method: POST
+          headers: |
+            Authorization: Bearer ${{ secrets.MONITORING_API_TOKEN }}
+            Content-Type: application/json
+          body: |
+            {
+              "resource_id": "${{ steps.extract-connection-details.outputs.resource_id }}",
+              "resource_type": "${inputs.resource_type}",
+              "name": "${inputs.resource_name}",
+              "application": "${inputs.app_id}",
+              "environment": "${inputs.env_id}",
+              "team": "${{ needs.check-resource-availability.outputs.user_team }}",
+              "owner": "${{ needs.check-resource-availability.outputs.user_email }}",
+              "cloud_provider": "${{ steps.extract-connection-details.outputs.cloud_provider }}",
+              "region": "${{ steps.extract-connection-details.outputs.region }}"
+            }
+
+      # Step 5: Register with cloud cost tracking
+      - id: register-cost-tracking
+        name: Register with cloud cost tracking
+        uses: humanitec/http-request
+        with:
+          url: https://your-cost-tracking-api.example.com/resources
+          method: POST
+          headers: |
+            Authorization: Bearer ${{ secrets.COST_TRACKING_API_TOKEN }}
+            Content-Type: application/json
+          body: |
+            {
+              "resource_id": "${{ steps.extract-connection-details.outputs.resource_id }}",
+              "resource_type": "${inputs.resource_type}",
+              "name": "${inputs.resource_name}",
+              "application": "${inputs.app_id}",
+              "environment": "${inputs.env_id}",
+              "team": "${{ needs.check-resource-availability.outputs.user_team }}",
+              "owner": "${{ needs.check-resource-availability.outputs.user_email }}",
+              "cost_center": "${{ needs.check-resource-availability.outputs.user_team }}-cc"
+            }
+
+      # Step 6: Update resource metadata in Humanitec
+      - id: update-resource-metadata
+        name: Update resource metadata in Humanitec
+        uses: humanitec/cli-action
+        with:
+          command: api patch /orgs/${org}/apps/${inputs.app_id}/envs/${inputs.env_id}/resources/${inputs.resource_type}/${inputs.resource_name} -d '{
+            "metadata": {
+              "monitoring_url": "https://your-monitoring-dashboard.example.com/resources/${{ steps.extract-connection-details.outputs.resource_id }}",
+              "cost_tracking_url": "https://your-cost-tracking-dashboard.example.com/resources/${{ steps.extract-connection-details.outputs.resource_id }}",
+              "team": "${{ needs.check-resource-availability.outputs.user_team }}",
+              "owner": "${{ needs.check-resource-availability.outputs.user_email }}"
+            }
+          }'
+
+      # Step 7: Notify user that resource is ready
+      - id: notify-resource-ready
+        name: Notify user that resource is ready
+        uses: humanitec/http-request
+        with:
+          url: ${{ needs.check-resource-availability.outputs.teams_webhook }}
+          method: POST
+          headers: |
+            Content-Type: application/json
+          body: |
+            {
+              "@type": "MessageCard",
+              "@context": "http://schema.org/extensions",
+              "themeColor": "0076D7",
+              "summary": "Resource Dependency Added",
+              "sections": [
+                {
+                  "activityTitle": "Resource Dependency Added Successfully",
+                  "activitySubtitle": "The requested resource has been added to your application",
+                  "facts": [
+                    {
+                      "name": "Resource Type",
+                      "value": "${inputs.resource_type}"
+                    },
+                    {
+                      "name": "Resource Name",
+                      "value": "${inputs.resource_name}"
+                    },
+                    {
+                      "name": "Application",
+                      "value": "${inputs.app_id}"
+                    },
+                    {
+                      "name": "Environment",
+                      "value": "${inputs.env_id}"
+                    }
+                  ],
+                  "text": "Environment variables have been set up as application values in Humanitec. The resource is now connected to your workload and ready to use.",
+                  "markdown": true
+                }
+              ],
+              "potentialAction": [
+                {
+                  "@type": "OpenUri",
+                  "name": "View in Humanitec",
+                  "targets": [
+                    {
+                      "os": "default",
+                      "uri": "https://app.humanitec.io/orgs/${org}/apps/${inputs.app_id}/envs/${inputs.env_id}/resources"
+                    }
+                  ]
+                },
+                {
+                  "@type": "OpenUri",
+                  "name": "View Monitoring",
+                  "targets": [
+                    {
+                      "os": "default",
+                      "uri": "https://your-monitoring-dashboard.example.com/resources/${{ steps.extract-connection-details.outputs.resource_id }}"
+                    }
+                  ]
+                }
+              ]
+            }
+
+outputs:
+  resource_available: ${{ jobs.check-resource-availability.outputs.check-resource-type != '0' }}
+  deployment_id: ${{ jobs.add-resource-dependency.outputs.deployment_id }}
+  jira_ticket: ${{ jobs.create-jira-ticket.outputs.ticket_key }}
