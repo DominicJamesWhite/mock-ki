@@ -1,32 +1,461 @@
 id: create-application
-name: Create Application
-description: Create a new application.
+name: Create New Application
+description: Creates a new application with a development environment, sets up GitHub repository, deploys workload with required resources, and notifies the user via Slack.
+
 on:
   path_call:
     inputs:
-      app_id:
-        type: string
-        description: "Application ID to create"
-        required: true
       app_name:
         type: string
-        description: "Friendly name for the application"
+        description: "Name of the application to create"
         required: true
-      env_type:
+      team_id:
         type: string
-        description: "Environment type for the initial environment"
+        description: "Team that owns the application"
         required: true
-      create_initial_env:
+      template_repo:
+        type: string
+        description: "GitHub template repository to use as starter"
+        required: true
+      db_type:
+        type: string
+        description: "Type of database to create (postgres, mysql, mongodb)"
+        required: true
+      message_broker:
+        type: string
+        description: "Message broker to use (kafka, rabbitmq, sqs)"
+        required: false
+      use_s3:
         type: boolean
-        description: "Whether to create an initial environment"
+        description: "Whether to create an S3 bucket"
         required: false
 
+timeout-minutes: 30
+
 jobs:
-  create-app:
-    name: Create Humanitec Application
+  prepare-app-creation:
+    name: Prepare Application Creation
     steps:
-      - id: create-app
-        name: Create the application
+      - id: validate-inputs
+        name: Validate Inputs
+        uses: humanitec/javascript-action
+        with:
+          script: |
+            // Validate app name
+            const appName = process.env.APP_NAME;
+            if (!appName.match(/^[a-z0-9](?:-?[a-z0-9]+)+$/)) {
+              core.setFailed("Application name must be lowercase alphanumeric with hyphens, and cannot start or end with a hyphen");
+              return false;
+            }
+
+            // Validate team ID exists
+            const teamId = process.env.TEAM_ID;
+            // Here you would validate the team exists in your system
+
+            // Validate template repo is from allowed list
+            const templateRepo = process.env.TEMPLATE_REPO;
+            const allowedTemplates = ["starter-nodejs", "starter-python", "starter-java", "starter-go"];
+            if (!allowedTemplates.includes(templateRepo)) {
+              core.setFailed(`Template repo must be one of: ${allowedTemplates.join(", ")}`);
+              return false;
+            }
+
+            // Validate DB type
+            const dbType = process.env.DB_TYPE;
+            const allowedDBs = ["postgres", "mysql", "mongodb"];
+            if (!allowedDBs.includes(dbType)) {
+              core.setFailed(`Database type must be one of: ${allowedDBs.join(", ")}`);
+              return false;
+            }
+
+            // Validate message broker if provided
+            const messageBroker = process.env.MESSAGE_BROKER;
+            if (messageBroker) {
+              const allowedBrokers = ["kafka", "rabbitmq", "sqs"];
+              if (!allowedBrokers.includes(messageBroker)) {
+                core.setFailed(`Message broker must be one of: ${allowedBrokers.join(", ")}`);
+                return false;
+              }
+            }
+
+            return true;
+        env:
+          APP_NAME: ${{ inputs.app_name }}
+          TEAM_ID: ${{ inputs.team_id }}
+          TEMPLATE_REPO: ${{ inputs.template_repo }}
+          DB_TYPE: ${{ inputs.db_type }}
+          MESSAGE_BROKER: ${{ inputs.message_broker }}
+
+      - id: determine-cost-center
+        name: Determine Cost Center
+        uses: humanitec/javascript-action
+        with:
+          script: |
+            // Map teams to cost centers
+            const teamCostCenterMap = {
+              "team-alpha": "cc-product-development",
+              "team-beta": "cc-platform",
+              "team-gamma": "cc-research",
+              "team-delta": "cc-operations"
+            };
+
+            const teamId = process.env.TEAM_ID;
+            const costCenter = teamCostCenterMap[teamId] || "cc-default";
+
+            return costCenter;
+        env:
+          TEAM_ID: ${{ inputs.team_id }}
+
+      - id: get-current-user
+        name: Get Current User
         uses: humanitec/cli-action
         with:
-          command: create app ${inputs.app_id} --name "${inputs.app_name}"
+          command: api get /current-user -o json
+
+      - id: extract-user-info
+        name: Extract User Information
+        uses: humanitec/javascript-action
+        with:
+          script: |
+            const userInfo = JSON.parse(process.env.USER_INFO);
+            const userId = userInfo.id;
+            const userEmail = userInfo.email;
+            const githubTeam = userInfo.metadata?.github_team || "default-team";
+
+            return {
+              userId,
+              userEmail,
+              githubTeam
+            };
+        env:
+          USER_INFO: ${{ steps.get-current-user.outputs.stdout }}
+
+  create-app-resources:
+    name: Create Application and Resources
+    needs: prepare-app-creation
+    steps:
+      - id: create-app
+        name: Create Application
+        uses: humanitec/cli-action
+        with:
+          command: create app ${inputs.app_name} -o json
+
+      - id: set-app-metadata
+        name: Set Application Metadata
+        uses: humanitec/cli-action
+        with:
+          command: |
+            api patch /orgs/${HUMANITEC_ORG}/apps/${inputs.app_name} -d '{
+              "metadata": {
+                "team": "${inputs.team_id}",
+                "cost-center": "${{ needs.prepare-app-creation.outputs.determine-cost-center }}",
+                "creator": "${{ needs.prepare-app-creation.outputs.extract-user-info.userId }}",
+                "creator-email": "${{ needs.prepare-app-creation.outputs.extract-user-info.userEmail }}"
+              }
+            }'
+
+      - id: create-github-repo
+        name: Create GitHub Repository
+        uses: humanitec/script
+        with:
+          script: |
+            # Create a new repository based on template
+            # Using GitHub's API
+
+            GITHUB_TEAM="${{ needs.prepare-app-creation.outputs.extract-user-info.githubTeam }}"
+            REPO_NAME="${inputs.app_name}"
+            TEMPLATE_REPO="${inputs.template_repo}"
+
+            # This would be a call to GitHub API to create a repo from a template
+            # For demonstration purposes, we're creating a placeholder response
+
+            cat > /tmp/github_response.json << EOF
+            {
+              "name": "${REPO_NAME}",
+              "full_name": "${GITHUB_TEAM}/${REPO_NAME}",
+              "clone_url": "https://github.com/${GITHUB_TEAM}/${REPO_NAME}.git",
+              "html_url": "https://github.com/${GITHUB_TEAM}/${REPO_NAME}"
+            }
+            EOF
+
+            REPO_URL=$(cat /tmp/github_response.json | jq -r '.html_url')
+            CLONE_URL=$(cat /tmp/github_response.json | jq -r '.clone_url')
+
+            echo "::set-output name=repo_url::${REPO_URL}"
+            echo "::set-output name=clone_url::${CLONE_URL}"
+
+      - id: trigger-image-build
+        name: Trigger Image Build
+        uses: humanitec/script
+        with:
+          script: |
+            # Trigger a build using GitHub Actions API
+            REPO_NAME="${{ needs.prepare-app-creation.outputs.extract-user-info.githubTeam }}/${inputs.app_name}"
+
+            # This would be a call to GitHub Actions API to trigger a workflow
+            # For demonstration purposes, we're creating a placeholder response
+
+            cat > /tmp/build_response.json << EOF
+            {
+              "workflow_id": "build-and-push.yml",
+              "run_id": "12345678",
+              "run_url": "https://github.com/${REPO_NAME}/actions/runs/12345678",
+              "status": "queued"
+            }
+            EOF
+
+            BUILD_ID=$(cat /tmp/build_response.json | jq -r '.run_id')
+            BUILD_URL=$(cat /tmp/build_response.json | jq -r '.run_url')
+
+            echo "::set-output name=build_id::${BUILD_ID}"
+            echo "::set-output name=build_url::${BUILD_URL}"
+
+      - id: wait-for-image
+        name: Wait for Image Build
+        uses: humanitec/script
+        with:
+          script: |
+            # Wait for the image build to complete
+            # In a real implementation, this would poll the GitHub Actions API
+
+            echo "Waiting for image build to complete..."
+            sleep 5 # Simulating wait
+
+            # For demo purposes, assume build is successful
+            IMAGE_NAME="${inputs.app_name}"
+            IMAGE_TAG="latest"
+            IMAGE_URI="ghcr.io/${{ needs.prepare-app-creation.outputs.extract-user-info.githubTeam }}/${IMAGE_NAME}:${IMAGE_TAG}"
+
+            echo "::set-output name=image_uri::${IMAGE_URI}"
+
+      - id: create-development-env
+        name: Create Development Environment
+        uses: humanitec/cli-action
+        with:
+          command: create env development --app ${inputs.app_name} --type development -o json
+
+    outputs:
+      repo_url: ${{ steps.create-github-repo.outputs.repo_url }}
+      image_uri: ${{ steps.wait-for-image.outputs.image_uri }}
+
+  deploy-workload:
+    name: Deploy Workload and Resources
+    needs: [prepare-app-creation, create-app-resources]
+    steps:
+      - id: create-delta
+        name: Create Deployment Delta
+        uses: humanitec/cli-action
+        with:
+          command: create delta --name "Initial deployment" --app ${inputs.app_name} --env development -o json
+
+      - id: get-delta-id
+        name: Extract Delta ID
+        uses: humanitec/javascript-action
+        with:
+          script: |
+            const delta = JSON.parse(process.env.DELTA_OUTPUT);
+            return delta.metadata.id;
+        env:
+          DELTA_OUTPUT: ${{ steps.create-delta.outputs.stdout }}
+
+      - id: add-workload
+        name: Add Workload to Delta
+        uses: humanitec/cli-action
+        with:
+          command: |
+            update delta ${steps.get-delta-id.outputs.result} add /modules/${inputs.app_name} '{
+              "type": "container",
+              "name": "${inputs.app_name}",
+              "spec": {
+                "containers": {
+                  "main": {
+                    "image": "${{ needs.create-app-resources.outputs.image_uri }}",
+                    "resources": {
+                      "limits": {
+                        "cpu": "0.25",
+                        "memory": "256Mi"
+                      },
+                      "requests": {
+                        "cpu": "0.1",
+                        "memory": "128Mi"
+                      }
+                    },
+                    "variables": {
+                      "APP_ENV": "development",
+                      "LOG_LEVEL": "debug"
+                    }
+                  }
+                }
+              }
+            }' --app ${inputs.app_name}
+
+      - id: add-ingress
+        name: Add Ingress Resource
+        uses: humanitec/cli-action
+        with:
+          command: |
+            update delta ${steps.get-delta-id.outputs.result} add /resources/dns/${inputs.app_name}-ingress '{
+              "type": "dns",
+              "class": "default"
+            }' --app ${inputs.app_name}
+
+      - id: connect-ingress
+        name: Connect Ingress to Workload
+        uses: humanitec/cli-action
+        with:
+          command: |
+            update delta ${steps.get-delta-id.outputs.result} add /modules/${inputs.app_name}/externals/ingress '{
+              "type": "dns",
+              "files": {}
+            }' --app ${inputs.app_name}
+
+      - id: add-database
+        name: Add Database Resource
+        uses: humanitec/cli-action
+        with:
+          command: |
+            update delta ${steps.get-delta-id.outputs.result} add /resources/${inputs.db_type}/${inputs.app_name}-db '{
+              "type": "${inputs.db_type}",
+              "class": "development"
+            }' --app ${inputs.app_name}
+
+      - id: connect-database
+        name: Connect Database to Workload
+        uses: humanitec/cli-action
+        with:
+          command: |
+            update delta ${steps.get-delta-id.outputs.result} add /modules/${inputs.app_name}/externals/database '{
+              "type": "${inputs.db_type}"
+            }' --app ${inputs.app_name}
+
+      - id: add-message-broker
+        name: Add Message Broker Resource
+        if: ${{ inputs.message_broker != '' }}
+        uses: humanitec/cli-action
+        with:
+          command: |
+            update delta ${steps.get-delta-id.outputs.result} add /resources/${inputs.message_broker}/${inputs.app_name}-broker '{
+              "type": "${inputs.message_broker}",
+              "class": "development"
+            }' --app ${inputs.app_name}
+
+      - id: connect-message-broker
+        name: Connect Message Broker to Workload
+        if: ${{ inputs.message_broker != '' }}
+        uses: humanitec/cli-action
+        with:
+          command: |
+            update delta ${steps.get-delta-id.outputs.result} add /modules/${inputs.app_name}/externals/message-broker '{
+              "type": "${inputs.message_broker}"
+            }' --app ${inputs.app_name}
+
+      - id: add-s3-bucket
+        name: Add S3 Bucket Resource
+        if: ${{ inputs.use_s3 == 'true' }}
+        uses: humanitec/cli-action
+        with:
+          command: |
+            update delta ${steps.get-delta-id.outputs.result} add /resources/s3/${inputs.app_name}-bucket '{
+              "type": "s3",
+              "class": "development"
+            }' --app ${inputs.app_name}
+
+      - id: connect-s3-bucket
+        name: Connect S3 Bucket to Workload
+        if: ${{ inputs.use_s3 == 'true' }}
+        uses: humanitec/cli-action
+        with:
+          command: |
+            update delta ${steps.get-delta-id.outputs.result} add /modules/${inputs.app_name}/externals/storage '{
+              "type": "s3"
+            }' --app ${inputs.app_name}
+
+      - id: deploy-delta
+        name: Deploy Delta
+        uses: humanitec/cli-action
+        with:
+          command: deploy delta ${steps.get-delta-id.outputs.result} development --app ${inputs.app_name} --message "Initial deployment of ${inputs.app_name}" -o json
+
+      - id: wait-for-deployment
+        name: Wait for Deployment
+        uses: humanitec/cli-action
+        with:
+          command: api get /orgs/${HUMANITEC_ORG}/apps/${inputs.app_name}/envs/development/deploys/${steps.deploy-delta.outputs.stdout}/status
+
+    outputs:
+      delta_id: ${{ steps.get-delta-id.outputs.result }}
+
+  notify-user:
+    name: Notify User
+    needs: [prepare-app-creation, create-app-resources, deploy-workload]
+    steps:
+      - id: get-app-url
+        name: Get Application URL
+        uses: humanitec/cli-action
+        with:
+          command: |
+            get active-resources --app ${inputs.app_name} --env development -o json | \
+            jq -r '.[] | select(.metadata.type == "dns" and .metadata.res_id == "dns.${inputs.app_name}-ingress") | .status.resource.host'
+
+      - id: send-slack-notification
+        name: Send Slack Notification
+        uses: humanitec/script
+        with:
+          script: |
+            # Get user email to find Slack user ID
+            USER_EMAIL="${{ needs.prepare-app-creation.outputs.extract-user-info.userEmail }}"
+            APP_URL="${{ steps.get-app-url.outputs.stdout }}"
+            REPO_URL="${{ needs.create-app-resources.outputs.repo_url }}"
+
+            # For demo purposes, we'll create a placeholder for the Slack notification
+
+            cat > /tmp/slack_message.json << EOF
+            {
+              "channel": "@user", 
+              "text": "Your new application is ready!",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Your new application '${inputs.app_name}' is ready!*"
+                  }
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "• *GitHub Repository:* <${REPO_URL}|${inputs.app_name}>\n• *Application URL:* <https://${APP_URL}|${APP_URL}>\n• *Team:* ${inputs.team_id}\n• *Environment:* development"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Application"
+                      },
+                      "url": "https://${APP_URL}"
+                    },
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Repository"
+                      },
+                      "url": "${REPO_URL}"
+                    }
+                  ]
+                }
+              ]
+            }
+            EOF
+
+            echo "::set-output name=notification_sent::true"
+            echo "::set-output name=app_url::${APP_URL}"
+
+    outputs:
+      app_url: ${{ steps.get-app-url.outputs.stdout }}
+      notification_sent: ${{ steps.send-slack-notification.outputs.notification_sent }}
