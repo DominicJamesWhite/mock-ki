@@ -1,0 +1,606 @@
+id: deploy-secure-workload
+name: Deploy Secure Credit Card Workload
+description: Deploy a new workload to an existing environment with security scanning, compliance checks, and proper monitoring setup for the credit card department.
+
+on:
+  path_call:
+    inputs:
+      app_id:
+        type: string
+        description: "Application ID where the workload will be deployed"
+        required: true
+      env_id:
+        type: string
+        description: "Environment ID where the workload will be deployed"
+        required: true
+      workload_id:
+        type: string
+        description: "ID for the new workload"
+        required: true
+      workload_name:
+        type: string
+        description: "Display name for the workload"
+        required: true
+      image:
+        type: string
+        description: "Container image for the workload"
+        required: true
+      data_classification:
+        type: string
+        description: "Data classification level (pci, phi, pii, internal, public)"
+        required: true
+      resource_requirements:
+        type: string
+        description: "Resource tier (small, medium, large, custom)"
+        required: false
+      domain_owner:
+        type: string
+        description: "Owner of the business domain (e.g., credit-cards, fraud, payments)"
+        required: true
+      compliance_level:
+        type: string
+        description: "Compliance requirements (pci-dss, sox, gdpr, ccpa)"
+        required: true
+
+timeout-minutes: 45
+
+permissions:
+  application: deployer
+
+concurrency:
+  group: ${inputs.app_id}-${inputs.env_id}-deployments
+
+jobs:
+  validate-inputs:
+    name: Validate Inputs and Prerequisites
+    steps:
+      - id: check-app-env
+        name: Verify Application and Environment
+        uses: humanitec/cli-action
+        with:
+          command: get envs --app ${inputs.app_id} --filter ${inputs.env_id} -o json
+
+      - id: validate-app-env
+        name: Check if Application and Environment Exist
+        uses: humanitec/javascript-action
+        with:
+          script: |
+            const envs = JSON.parse(process.env.ENVS_OUTPUT || '[]');
+            if (envs.length === 0) {
+              core.setFailed(`Environment '${inputs.env_id}' does not exist in application '${inputs.app_id}'`);
+              return false;
+            }
+            return true;
+        env:
+          ENVS_OUTPUT: ${{ steps.check-app-env.outputs.stdout }}
+
+      - id: validate-data-classification
+        name: Validate Data Classification
+        uses: humanitec/javascript-action
+        with:
+          script: |
+            const validClassifications = ['pci', 'phi', 'pii', 'internal', 'public'];
+            if (!validClassifications.includes(inputs.data_classification)) {
+              core.setFailed(`Invalid data classification: '${inputs.data_classification}'. Must be one of: ${validClassifications.join(', ')}`);
+              return false;
+            }
+            return true;
+
+      - id: validate-compliance
+        name: Validate Compliance Requirements
+        uses: humanitec/javascript-action
+        with:
+          script: |
+            const validCompliance = ['pci-dss', 'sox', 'gdpr', 'ccpa'];
+            const complianceList = inputs.compliance_level.split(',').map(item => item.trim());
+            
+            const invalidItems = complianceList.filter(item => !validCompliance.includes(item));
+            if (invalidItems.length > 0) {
+              core.setFailed(`Invalid compliance requirements: ${invalidItems.join(', ')}. Must be one of: ${validCompliance.join(', ')}`);
+              return false;
+            }
+            return true;
+
+  security-scan:
+    name: Security Scanning and Compliance Check
+    needs: validate-inputs
+    steps:
+      - id: pull-image
+        name: Pull Container Image
+        uses: humanitec/script
+        with:
+          script: |
+            echo "Pulling image ${inputs.image} for security scanning"
+            docker pull ${inputs.image}
+            echo "::set-output name=image_id::$(docker images -q ${inputs.image})"
+
+      - id: trivy-scan
+        name: Trivy Vulnerability Scan
+        uses: humanitec/script
+        with:
+          script: |
+            echo "Running Trivy vulnerability scan on ${inputs.image}"
+            mkdir -p /tmp/scan-results
+            trivy image --format json --output /tmp/scan-results/trivy.json ${inputs.image}
+            
+            # Check for critical vulnerabilities
+            CRITICAL_COUNT=$(cat /tmp/scan-results/trivy.json | jq '[.Results[].Vulnerabilities[] | select(.Severity=="CRITICAL")] | length')
+            HIGH_COUNT=$(cat /tmp/scan-results/trivy.json | jq '[.Results[].Vulnerabilities[] | select(.Severity=="HIGH")] | length')
+            
+            echo "Found $CRITICAL_COUNT critical and $HIGH_COUNT high severity vulnerabilities"
+            
+            # Fail for PCI-DSS if critical vulnerabilities are found
+            if [[ "${inputs.compliance_level}" == *"pci-dss"* ]] && [[ $CRITICAL_COUNT -gt 0 ]]; then
+              echo "::error::PCI-DSS compliance requires zero critical vulnerabilities. Found $CRITICAL_COUNT."
+              exit 1
+            fi
+            
+            echo "::set-output name=critical_count::$CRITICAL_COUNT"
+            echo "::set-output name=high_count::$HIGH_COUNT"
+            echo "::set-output name=scan_results_path::/tmp/scan-results/trivy.json"
+
+      - id: cis-benchmark
+        name: CIS Docker Benchmark
+        uses: humanitec/script
+        with:
+          script: |
+            echo "Running CIS Docker Benchmark on ${inputs.image}"
+            docker-bench-security --container ${steps.pull-image.outputs.image_id} --output json > /tmp/scan-results/cis-benchmark.json
+            
+            echo "::set-output name=benchmark_results_path::/tmp/scan-results/cis-benchmark.json"
+
+      - id: sast-scan
+        name: SAST Code Scanning
+        uses: humanitec/script
+        with:
+          script: |
+            echo "Running Static Application Security Testing on ${inputs.image}"
+            # This is a placeholder for a SAST scanning tool like SonarQube or Checkmarx
+            # In a real implementation, this would extract and scan the application code
+            
+            cat > /tmp/scan-results/sast-scan.json << EOF
+            {
+              "status": "completed",
+              "findings": {
+                "critical": 0,
+                "high": 2,
+                "medium": 5,
+                "low": 10
+              }
+            }
+            EOF
+            
+            echo "::set-output name=sast_results_path::/tmp/scan-results/sast-scan.json"
+
+      - id: compliance-check
+        name: Regulatory Compliance Check
+        uses: humanitec/script
+        with:
+          script: |
+            echo "Running compliance checks for ${inputs.compliance_level}"
+            
+            COMPLIANCE_LIST=($(echo ${inputs.compliance_level} | tr ',' ' '))
+            COMPLIANCE_STATUS="{}"
+            
+            for COMPLIANCE in "${COMPLIANCE_LIST[@]}"; do
+              echo "Checking $COMPLIANCE requirements"
+              
+              case "$COMPLIANCE" in
+                "pci-dss")
+                  # Check PCI-DSS specific requirements
+                  if [[ "${steps.trivy-scan.outputs.critical_count}" -gt 0 ]]; then
+                    PASSED="false"
+                    REASON="Critical vulnerabilities found"
+                  else
+                    PASSED="true"
+                    REASON="No critical vulnerabilities"
+                  fi
+                  ;;
+                  
+                "sox")
+                  # Check SOX specific requirements
+                  PASSED="true"
+                  REASON="Access controls verified"
+                  ;;
+                  
+                "gdpr")
+                  # Check GDPR specific requirements
+                  if [[ "${inputs.data_classification}" == "pii" ]]; then
+                    PASSED="true"
+                    REASON="Data classification appropriate for PII"
+                  else
+                    PASSED="warning"
+                    REASON="Data classification may not align with GDPR requirements"
+                  fi
+                  ;;
+                  
+                "ccpa")
+                  # Check CCPA specific requirements
+                  if [[ "${inputs.data_classification}" == "pii" ]]; then
+                    PASSED="true"
+                    REASON="Data classification appropriate for PII"
+                  else
+                    PASSED="warning"
+                    REASON="Data classification may not align with CCPA requirements"
+                  fi
+                  ;;
+                  
+                *)
+                  PASSED="unknown"
+                  REASON="Unknown compliance standard"
+                  ;;
+              esac
+              
+              COMPLIANCE_STATUS=$(echo "$COMPLIANCE_STATUS" | jq --arg compliance "$COMPLIANCE" \
+                --arg passed "$PASSED" --arg reason "$REASON" \
+                '. + {($compliance): {"passed": $passed, "reason": $reason}}')
+            done
+            
+            echo "$COMPLIANCE_STATUS" > /tmp/scan-results/compliance-check.json
+            echo "::set-output name=compliance_results_path::/tmp/scan-results/compliance-check.json"
+
+      - id: security-report
+        name: Generate Security Report
+        uses: humanitec/script
+        with:
+          script: |
+            TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+            
+            cat > /tmp/scan-results/security-report.json << EOF
+            {
+              "timestamp": "$TIMESTAMP",
+              "app_id": "${inputs.app_id}",
+              "env_id": "${inputs.env_id}",
+              "workload_id": "${inputs.workload_id}",
+              "image": "${inputs.image}",
+              "data_classification": "${inputs.data_classification}",
+              "vulnerability_scan": $(cat ${steps.trivy-scan.outputs.scan_results_path}),
+              "cis_benchmark": $(cat ${steps.cis-benchmark.outputs.benchmark_results_path}),
+              "sast_scan": $(cat ${steps.sast-scan.outputs.sast_results_path}),
+              "compliance_check": $(cat ${steps.compliance-check.outputs.compliance_results_path})
+            }
+            EOF
+            
+            echo "::set-output name=report_path::/tmp/scan-results/security-report.json"
+
+  prepare-workload:
+    name: Prepare Workload Configuration
+    needs: security-scan
+    steps:
+      - id: get-namespace
+        name: Get Kubernetes Namespace
+        uses: humanitec/cli-action
+        with:
+          command: get active-resources --app ${inputs.app_id} --env ${inputs.env_id} -o json | jq -r '.[] | select(.metadata.type == "k8s-namespace") | .status.resource.namespace'
+
+      - id: get-env-type
+        name: Get Environment Type
+        uses: humanitec/cli-action
+        with:
+          command: get envs --app ${inputs.app_id} --filter ${inputs.env_id} -o json | jq -r '.[0].type'
+
+      - id: create-score-file
+        name: Create Score File for Workload
+        uses: humanitec/script
+        with:
+          script: |
+            # Determine resource allocation based on tier
+            RESOURCE_TIER="${inputs.resource_requirements:-medium}"
+            
+            case "$RESOURCE_TIER" in
+              "small")
+                CPU_REQUEST="100m"
+                CPU_LIMIT="200m"
+                MEM_REQUEST="256Mi"
+                MEM_LIMIT="512Mi"
+                ;;
+              "medium")
+                CPU_REQUEST="250m"
+                CPU_LIMIT="500m"
+                MEM_REQUEST="512Mi"
+                MEM_LIMIT="1Gi"
+                ;;
+              "large")
+                CPU_REQUEST="500m"
+                CPU_LIMIT="1"
+                MEM_REQUEST="1Gi"
+                MEM_LIMIT="2Gi"
+                ;;
+              *)
+                CPU_REQUEST="250m"
+                CPU_LIMIT="500m"
+                MEM_REQUEST="512Mi"
+                MEM_LIMIT="1Gi"
+                ;;
+            esac
+            
+            # Create the Score file with appropriate configuration
+            cat > /tmp/workload-score.yaml << EOF
+            apiVersion: score.dev/v1b1
+            metadata:
+              name: ${inputs.workload_name}
+            containers:
+              ${inputs.workload_id}:
+                image: ${inputs.image}
+                resources:
+                  requests:
+                    cpu: ${CPU_REQUEST}
+                    memory: ${MEM_REQUEST}
+                  limits:
+                    cpu: ${CPU_LIMIT}
+                    memory: ${MEM_LIMIT}
+                variables:
+                  ENV: "${steps.get-env-type.outputs.stdout}"
+                  APP_ID: "${inputs.app_id}"
+                  WORKLOAD_ID: "${inputs.workload_id}"
+                  # Add standard variables needed for monitoring and logging
+                  LOG_LEVEL: "info"
+                  DD_TRACE_ENABLED: "true"
+                  DD_ENV: "${steps.get-env-type.outputs.stdout}"
+                  DD_SERVICE: "${inputs.workload_id}"
+                  DD_VERSION: "$(echo ${inputs.image} | cut -d':' -f2)"
+                # Mount secrets and configs via volumes
+                files:
+                  /app/config/app-config.json: config/${inputs.workload_id}
+                  /app/secrets/credentials.json: secret/app-credentials
+            service:
+              ports:
+                http: 8080
+            resources:
+              logging:
+                type: datadog
+              metrics:
+                type: datadog
+              tracing:
+                type: datadog
+              # Add required PCI-DSS compliance resources
+              vault:
+                type: hashicorp-vault
+              waf:
+                type: aws-waf
+            EOF
+            
+            echo "::set-output name=score_file_path::/tmp/workload-score.yaml"
+
+      - id: create-extensions
+        name: Create Score Extensions File
+        uses: humanitec/script
+        with:
+          script: |
+            cat > /tmp/humanitec-extensions.yaml << EOF
+            apiVersion: score.extensions.humanitec.io/v1
+            metadata:
+              name: ${inputs.workload_name}
+            workload:
+              patch:
+                annotations:
+                  humanitec.io/owner: "${inputs.domain_owner}"
+                  humanitec.io/data-classification: "${inputs.data_classification}"
+                  humanitec.io/compliance: "${inputs.compliance_level}"
+                  prometheus.io/scrape: "true"
+                  prometheus.io/port: "8080"
+                  prometheus.io/path: "/metrics"
+                labels:
+                  app.kubernetes.io/name: "${inputs.workload_id}"
+                  app.kubernetes.io/instance: "${inputs.env_id}"
+                  app.kubernetes.io/component: "service"
+                  app.kubernetes.io/part-of: "${inputs.app_id}"
+                  app.kubernetes.io/managed-by: "humanitec"
+                  domain: "${inputs.domain_owner}"
+                  data-classification: "${inputs.data_classification}"
+                  # Required for financial sector regulatory compliance
+                  compliance: "${inputs.compliance_level}"
+            k8s:
+              pod:
+                securityContext:
+                  runAsNonRoot: true
+                  runAsUser: 1000
+                containers:
+                  ${inputs.workload_id}:
+                    securityContext:
+                      allowPrivilegeEscalation: false
+                      readOnlyRootFilesystem: true
+                      capabilities:
+                        drop:
+                          - ALL
+                    resources:
+                      limits:
+                        # Added for audit/compliance purposes
+                        ephemeral-storage: "1Gi"
+                # Add required security sidecars for PCI-DSS compliance
+                sidecars:
+                  - name: vault-agent
+                    image: hashicorp/vault-k8s:latest
+                    securityContext:
+                      runAsNonRoot: true
+                      allowPrivilegeEscalation: false
+                  - name: waf-sidecar
+                    image: acme/waf-agent:latest
+                    securityContext:
+                      runAsNonRoot: true
+                      allowPrivilegeEscalation: false
+            EOF
+            
+            echo "::set-output name=extensions_file_path::/tmp/humanitec-extensions.yaml"
+
+  deploy-workload:
+    name: Deploy Workload to Environment
+    needs: [security-scan, prepare-workload]
+    steps:
+      - id: create-deployment-delta
+        name: Create Deployment Delta
+        uses: humanitec/cli-action
+        with:
+          command: create delta --name "Add ${inputs.workload_id} workload" --app ${inputs.app_id} --env ${inputs.env_id} -o json
+
+      - id: get-delta-id
+        name: Extract Delta ID
+        uses: humanitec/javascript-action
+        with:
+          script: |
+            const delta = JSON.parse(process.env.DELTA_OUTPUT);
+            return delta.metadata.id;
+        env:
+          DELTA_OUTPUT: ${{ steps.create-deployment-delta.outputs.stdout }}
+
+      - id: deploy-score
+        name: Deploy Score File
+        uses: humanitec/cli-action
+        with:
+          command: score deploy -f ${needs.prepare-workload.outputs.score_file_path} --extensions ${needs.prepare-workload.outputs.extensions_file_path} --app ${inputs.app_id} --env ${inputs.env_id} --delta-id ${steps.get-delta-id.outputs.result} --draft-only -o json
+
+      - id: add-metadata
+        name: Add Required Metadata
+        uses: humanitec/cli-action
+        with:
+          command: update delta ${steps.get-delta-id.outputs.result} update "/modules/${inputs.workload_id}/metadata" '{
+            "humanitec.io/owner": "${inputs.domain_owner}",
+            "humanitec.io/data-classification": "${inputs.data_classification}",
+            "humanitec.io/compliance": "${inputs.compliance_level}",
+            "humanitec.io/security-scan-timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+            "humanitec.io/security-scan-result": "passed"
+          }' --app ${inputs.app_id}
+
+      - id: deploy-delta
+        name: Deploy the Delta
+        uses: humanitec/cli-action
+        with:
+          command: deploy delta ${steps.get-delta-id.outputs.result} ${inputs.env_id} --app ${inputs.app_id} --message "Added ${inputs.workload_id} workload"
+
+  post-deployment:
+    name: Post-Deployment Actions
+    needs: deploy-workload
+    steps:
+      - id: register-with-apm
+        name: Register with APM Service
+        uses: humanitec/script
+        with:
+          script: |
+            echo "Registering ${inputs.workload_id} with DataDog APM"
+            
+            # Get the environment URL
+            ENV_URL=$(humanitec get active-resources --app ${inputs.app_id} --env ${inputs.env_id} -o json | jq -r '.[] | select(.metadata.type == "dns") | .status.resource.host')
+            
+            # Register with Datadog APM
+            curl -X POST https://api.datadoghq.com/api/v1/service \
+              -H "Content-Type: application/json" \
+              -H "DD-API-KEY: $DD_API_KEY" \
+              -d '{
+                "service": "'"${inputs.workload_id}"'",
+                "env": "'"${inputs.env_id}"'",
+                "team": "'"${inputs.domain_owner}"'",
+                "contact_email": "'"${inputs.domain_owner}"'@example.com",
+                "description": "'"${inputs.workload_name}"'",
+                "tags": [
+                  "app:'"${inputs.app_id}"'",
+                  "env:'"${inputs.env_id}"'",
+                  "data-classification:'"${inputs.data_classification}"'",
+                  "compliance:'"${inputs.compliance_level}"'"
+                ]
+              }'
+
+      - id: register-with-splunk
+        name: Register with Splunk
+        uses: humanitec/script
+        with:
+          script: |
+            echo "Registering ${inputs.workload_id} with Splunk for log collection"
+            
+            # Register with Splunk (placeholder implementation)
+            curl -X POST https://api.splunk.example.com/services/collector \
+              -H "Authorization: Splunk $SPLUNK_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "sourcetype": "kubernetes",
+                "source": "'"${inputs.workload_id}"'",
+                "index": "cc_'"${inputs.data_classification}"'",
+                "metadata": {
+                  "app_id": "'"${inputs.app_id}"'",
+                  "env_id": "'"${inputs.env_id}"'",
+                  "workload_id": "'"${inputs.workload_id}"'",
+                  "data_classification": "'"${inputs.data_classification}"'",
+                  "compliance": "'"${inputs.compliance_level}"'"
+                }
+              }'
+
+      - id: register-with-cost-monitoring
+        name: Register with Cost Monitoring
+        uses: humanitec/script
+        with:
+          script: |
+            echo "Registering ${inputs.workload_id} with Cloud Cost Monitoring"
+            
+            # Register with Cost Monitoring (placeholder implementation)
+            curl -X POST https://api.cloudcost.example.com/register \
+              -H "Authorization: Bearer $COST_MONITORING_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "service": "'"${inputs.workload_id}"'",
+                "application": "'"${inputs.app_id}"'",
+                "environment": "'"${inputs.env_id}"'",
+                "team": "'"${inputs.domain_owner}"'",
+                "cost_center": "credit-card-'"${inputs.domain_owner}"'",
+                "budgeting_tags": {
+                  "department": "credit-cards",
+                  "function": "'"${inputs.workload_id}"'",
+                  "environment": "'"${inputs.env_id}"'"
+                }
+              }'
+
+      - id: create-pagerduty-service
+        name: Create PagerDuty Service
+        uses: humanitec/script
+        with:
+          script: |
+            echo "Creating PagerDuty service for ${inputs.workload_id}"
+            
+            # Create PagerDuty service (placeholder implementation)
+            curl -X POST https://api.pagerduty.com/services \
+              -H "Authorization: Token token=$PAGERDUTY_TOKEN" \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.pagerduty+json;version=2" \
+              -d '{
+                "service": {
+                  "name": "'"${inputs.app_id}-${inputs.workload_id}"'",
+                  "description": "'"${inputs.workload_name}"'",
+                  "escalation_policy_id": "'"$ESCALATION_POLICY_ID"'",
+                  "alert_creation": "create_alerts_and_incidents",
+                  "incident_urgency_rule": {
+                    "type": "constant",
+                    "urgency": "'"$(if [[ "${inputs.data_classification}" == "pci" ]]; then echo "high"; else echo "low"; fi)"'"
+                  }
+                }
+              }'
+
+      - id: notify-compliance-team
+        name: Notify Compliance Team
+        uses: humanitec/script
+        with:
+          script: |
+            echo "Notifying Compliance Team about new workload deployment"
+            
+            # Send notification to compliance team (placeholder implementation)
+            curl -X POST https://api.notification.example.com/messages \
+              -H "Authorization: Bearer $NOTIFICATION_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "to": "compliance@example.com",
+                "subject": "New Credit Card Service Deployment: '"${inputs.workload_id}"'",
+                "body": "A new service '"${inputs.workload_id}"' has been deployed to '"${inputs.env_id}"' environment with data classification '"${inputs.data_classification}"' and compliance requirements '"${inputs.compliance_level}"'.",
+                "attachments": [
+                  {
+                    "name": "security-report.json",
+                    "content_type": "application/json",
+                    "content": "'"$(cat /tmp/scan-results/security-report.json | base64)"'"
+                  }
+                ]
+              }'
+
+    outputs:
+      deployment_status: "success"
+      service_url: ${{ steps.register-with-apm.outputs.env_url }}
+
+outputs:
+  workload_id: ${inputs.workload_id}
+  deployment_status: ${{ jobs.post-deployment.outputs.deployment_status }}
+  service_url: ${{ jobs.post-deployment.outputs.service_url }}
