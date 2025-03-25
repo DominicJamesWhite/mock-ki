@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>D3 Force-Directed Graph</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        margin: 0;
+        padding: 0;
+        background-color: #f8f1ef;
+        overflow: hidden;
+        color: #171717;
+      }
+
+      .container {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        width: 100vw;
+        transition: all 0.5s ease;
+      }
+
+      .graph-container {
+        flex: 1;
+        transition: all 0.5s ease;
+      }
+
+      #graph {
+        width: 100%;
+        height: 100%;
+        background-color: #f8f1ef;
+      }
+
+      .details-container {
+        display: none;
+        background-color: #f8f1ef;
+        padding: 20px;
+        box-shadow: -2px 0 5px rgba(0, 0, 0, 0.1);
+        overflow-y: auto;
+        transition: all 0.5s ease;
+      }
+
+      .node {
+        cursor: pointer;
+      }
+
+      .node text {
+        pointer-events: none;
+        font-size: 10px;
+      }
+
+      .node-label-bg {
+        rx: 3;
+        ry: 3;
+        opacity: 0.8;
+      }
+
+      .link {
+        stroke: #999;
+        stroke-opacity: 0.6;
+        transition: stroke-opacity 0.3s;
+      }
+
+      .link-explanation-bg {
+        fill: white;
+        rx: 3;
+        ry: 3;
+        padding: 3px;
+      }
+
+      .controls {
+        position: absolute;
+        bottom: 20px;
+        left: 20px;
+        z-index: 100;
+        display: flex;
+        gap: 10px;
+      }
+
+      button {
+        background-color: #ea9290;
+        color: black;
+        border: none;
+        padding: 8px 16px;
+        margin: 0 5px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+        transition: background-color 0.3s;
+      }
+
+      button:hover {
+        background-color: #09983a;
+      }
+
+      .node-actions {
+        margin-top: 10px;
+      }
+
+      .node-details {
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #f0f0f0;
+        border-radius: 4px;
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container" id="main-container">
+      <div class="graph-container" id="graph-container">
+        <div id="graph"></div>
+        <div class="controls">
+          <button id="toggle-labels">Toggle Labels</button>
+          <button id="reset-highlight">Reset View</button>
+        </div>
+      </div>
+      <div class="details-container" id="details-container">
+        <div id="node-details"></div>
+        <div id="node-actions" class="node-actions">
+          <button id="hide-others">Hide Unconnected Nodes</button>
+          <button id="show-all">Show All Nodes</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <script>
+      // Data
+      const data = {
+        links: [
+          // Top level structure relationships
+          { source: "banking-core", target: "banking-platform" },
+          { source: "banking-core", target: "banking-integrations" },
+          { source: "banking-core", target: "banking-frontend" },
+
+          // Banking platform services
+          { source: "banking-platform", target: "branch-agent-service" },
+          { source: "banking-platform", target: "account-management-service" },
+          { source: "banking-platform", target: "financial-document-service" },
+          { source: "banking-platform", target: "compliance-log-service" },
+          {
+            source: "banking-platform",
+            target: "access-control-enforcer-service",
+          },
+          { source: "banking-platform", target: "permission-manager-service" },
+          {
+            source: "banking-platform",
+            target: "scheduled-transaction-service",
+          },
+          {
+            source: "banking-platform",
+            target: "scheduled-transaction-worker",
+          },
+          { source: "banking-platform", target: "scheduled-payment-worker" },
+          { source: "banking-platform", target: "banking-access-service" },
+          { source: "banking-platform", target: "credentials-vault-service" },
+          { source: "banking-platform", target: "default-banking-service" },
+          { source: "banking-platform", target: "transaction-service" },
+          { source: "banking-platform", target: "transaction-batch-service" },
+          { source: "banking-platform", target: "notification-email-service" },
+          { source: "banking-platform", target: "banking-events-service" },
+          { source: "banking-platform", target: "events-processing-worker" },
+          { source: "banking-platform", target: "feature-testing-service" },
+          { source: "banking-platform", target: "encryption-keys-service" },
+          { source: "banking-platform", target: "transaction-logs-service" },
+          { source: "banking-platform", target: "customer-alerts-service" },
+          { source: "banking-platform", target: "corporate-banking-service" },
+          { source: "banking-platform", target: "loan-processing-service" },
+          { source: "banking-platform", target: "loan-servicing-worker" },
+          { source: "banking-platform", target: "card-registry-service" },
+          { source: "banking-platform", target: "payment-gateway-service" },
+          { source: "banking-platform", target: "payment-provider-proxy" },
+          { source: "banking-platform", target: "financial-products-service" },
+          { source: "banking-platform", target: "financial-products-worker" },
+          { source: "banking-platform", target: "online-banking-service" },
+          { source: "banking-platform", target: "secure-vault-service" },
+          { source: "banking-platform", target: "pin-manager-service" },
+          { source: "banking-platform", target: "fraud-detection-service" },
+          { source: "banking-platform", target: "customer-service" },
+          { source: "banking-platform", target: "investment-service" },
+          { source: "banking-platform", target: "portfolio-service" },
+
+          // Banking frontend
+          { source: "banking-frontend", target: "web-banking-service" },
+
+          // Banking integrations
+          { source: "banking-integrations", target: "atm-agent" },
+          { source: "banking-integrations", target: "aws-cloud-integration" },
+          { source: "banking-integrations", target: "virtual-card-container" },
+          {
+            source: "banking-integrations",
+            target: "dns-cloudflare-integration",
+          },
+          {
+            source: "banking-integrations",
+            target: "dns-wildcard-integration",
+          },
+          {
+            source: "banking-integrations",
+            target: "high-availability-scaling",
+          },
+          {
+            source: "banking-integrations",
+            target: "kubernetes-orchestration",
+          },
+          {
+            source: "banking-integrations",
+            target: "audit-logging-integration",
+          },
+          { source: "banking-integrations", target: "mobile-banking-dns" },
+          { source: "banking-integrations", target: "mobile-banking-tls" },
+          { source: "banking-integrations", target: "database-service" },
+          { source: "banking-integrations", target: "fixed-deposit-service" },
+          { source: "banking-integrations", target: "async-deposit-service" },
+          { source: "banking-integrations", target: "reporting-template" },
+          {
+            source: "banking-integrations",
+            target: "infrastructure-provisioning",
+          },
+          { source: "banking-integrations", target: "storage-volumes" },
+
+          // Account Management Service dependencies
+          {
+            source: "account-management-service",
+            target: "permission-manager-service",
+          },
+          {
+            source: "account-management-service",
+            target: "transaction-batch-service",
+          },
+          {
+            source: "account-management-service",
+            target: "transaction-service",
+          },
+          {
+            source: "account-management-service",
+            target: "banking-events-service",
+          },
+          {
+            source: "account-management-service",
+            target: "loan-processing-service",
+          },
+          {
+            source: "account-management-service",
+            target: "online-banking-service",
+          },
+          {
+            source: "account-management-service",
+            target: "investment-service",
+          },
+          { source: "account-management-service", target: "message-queue" },
+
+          // Core infrastructure dependencies
+          { source: "transaction-service", target: "database" },
+          { source: "banking-events-service", target: "database" },
+          { source: "loan-processing-service", target: "database" },
+          { source: "fraud-detection-service", target: "database" },
+          { source: "financial-document-service", target: "message-queue" },
+          { source: "compliance-log-service", target: "database" },
+          { source: "customer-service", target: "database" },
+
+          // New infrastructure connections
+          { source: "database", target: "postgresql-main" },
+          { source: "database", target: "postgresql-replica" },
+          { source: "database", target: "mongodb-documents" },
+          { source: "database", target: "dynamodb-transactions" },
+          { source: "database", target: "rds-cluster" },
+          { source: "database", target: "aurora-cluster" },
+          { source: "message-queue", target: "kafka-events" },
+          { source: "message-queue", target: "sqs-tasks" },
+          { source: "message-queue", target: "sns-notifications" },
+          {
+            source: "financial-document-service",
+            target: "s3-document-storage",
+          },
+          { source: "financial-document-service", target: "mongodb-documents" },
+          { source: "transaction-service", target: "redis-cache" },
+          { source: "customer-service", target: "redis-cache" },
+          { source: "online-banking-service", target: "redis-session" },
+          { source: "web-banking-service", target: "memcached-api-cache" },
+          { source: "web-banking-service", target: "cloudfront-cdn" },
+          { source: "transaction-logs-service", target: "elasticsearch-logs" },
+          { source: "compliance-log-service", target: "elasticsearch-logs" },
+          { source: "audit-logging-integration", target: "elasticsearch-logs" },
+          {
+            source: "audit-logging-integration",
+            target: "cloudwatch-monitoring",
+          },
+          { source: "encryption-keys-service", target: "ec2-instances" },
+          { source: "secure-vault-service", target: "ec2-instances" },
+          { source: "credentials-vault-service", target: "ec2-instances" },
+          { source: "database-service", target: "s3-backup" },
+          {
+            source: "transaction-batch-service",
+            target: "dynamodb-transactions",
+          },
+          { source: "transaction-service", target: "aurora-cluster" },
+          {
+            source: "payment-gateway-service",
+            target: "dynamodb-transactions",
+          },
+          { source: "banking-events-service", target: "kafka-events" },
+          { source: "customer-alerts-service", target: "sns-notifications" },
+          { source: "notification-email-service", target: "sns-notifications" },
+          { source: "events-processing-worker", target: "sqs-tasks" },
+          { source: "loan-servicing-worker", target: "sqs-tasks" },
+          { source: "scheduled-transaction-worker", target: "sqs-tasks" },
+          { source: "scheduled-payment-worker", target: "sqs-tasks" },
+          { source: "feature-testing-service", target: "lambda-triggers" },
+          { source: "financial-products-worker", target: "lambda-triggers" },
+          { source: "aws-cloud-integration", target: "waf-security" },
+          { source: "mobile-banking-tls", target: "waf-security" },
+        ],
+
+        nodes: [
+          { group: 1, id: "banking-core" },
+
+          { group: 2, id: "banking-platform" },
+          { group: 2, id: "banking-integrations" },
+          { group: 2, id: "banking-frontend" },
+
+          // Platform services (group 3)
+          { group: 3, id: "branch-agent-service" },
+          { group: 3, id: "account-management-service" },
+          { group: 3, id: "financial-document-service" },
+          { group: 3, id: "compliance-log-service" },
+          { group: 3, id: "access-control-enforcer-service" },
+          { group: 3, id: "permission-manager-service" },
+          { group: 3, id: "scheduled-transaction-service" },
+          { group: 3, id: "scheduled-transaction-worker" },
+          { group: 3, id: "scheduled-payment-worker" },
+          { group: 3, id: "banking-access-service" },
+          { group: 3, id: "credentials-vault-service" },
+          { group: 3, id: "default-banking-service" },
+          { group: 3, id: "transaction-service" },
+          { group: 3, id: "transaction-batch-service" },
+          { group: 3, id: "notification-email-service" },
+          { group: 3, id: "banking-events-service" },
+          { group: 3, id: "events-processing-worker" },
+          { group: 3, id: "feature-testing-service" },
+          { group: 3, id: "encryption-keys-service" },
+          { group: 3, id: "transaction-logs-service" },
+          { group: 3, id: "customer-alerts-service" },
+          { group: 3, id: "corporate-banking-service" },
+          { group: 3, id: "loan-processing-service" },
+          { group: 3, id: "loan-servicing-worker" },
+          { group: 3, id: "card-registry-service" },
+          { group: 3, id: "payment-gateway-service" },
+          { group: 3, id: "payment-provider-proxy" },
+          { group: 3, id: "financial-products-service" },
+          { group: 3, id: "financial-products-worker" },
+          { group: 3, id: "online-banking-service" },
+          { group: 3, id: "secure-vault-service" },
+          { group: 3, id: "pin-manager-service" },
+          { group: 3, id: "fraud-detection-service" },
+          { group: 3, id: "customer-service" },
+          { group: 3, id: "investment-service" },
+          { group: 3, id: "portfolio-service" },
+          { group: 3, id: "web-banking-service" },
+
+          // Integration services (group 4)
+          { group: 4, id: "atm-agent" },
+          { group: 4, id: "aws-cloud-integration" },
+          { group: 4, id: "virtual-card-container" },
+          { group: 4, id: "dns-cloudflare-integration" },
+          { group: 4, id: "dns-wildcard-integration" },
+          { group: 4, id: "high-availability-scaling" },
+          { group: 4, id: "kubernetes-orchestration" },
+          { group: 4, id: "audit-logging-integration" },
+          { group: 4, id: "mobile-banking-dns" },
+          { group: 4, id: "mobile-banking-tls" },
+          { group: 4, id: "database-service" },
+          { group: 4, id: "fixed-deposit-service" },
+          { group: 4, id: "async-deposit-service" },
+          { group: 4, id: "reporting-template" },
+          { group: 4, id: "infrastructure-provisioning" },
+          { group: 4, id: "storage-volumes" },
+
+          // Infrastructure components (group 5)
+          { group: 5, id: "database" },
+          { group: 5, id: "message-queue" },
+
+          // New infrastructure nodes (group 6)
+          { group: 6, id: "postgresql-main" },
+          { group: 6, id: "postgresql-replica" },
+          { group: 6, id: "mongodb-documents" },
+          { group: 6, id: "redis-cache" },
+          { group: 6, id: "redis-session" },
+          { group: 6, id: "s3-document-storage" },
+          { group: 6, id: "s3-backup" },
+          { group: 6, id: "elasticsearch-logs" },
+          { group: 6, id: "kafka-events" },
+          { group: 6, id: "dynamodb-transactions" },
+          { group: 6, id: "memcached-api-cache" },
+          { group: 6, id: "cloudfront-cdn" },
+          { group: 6, id: "lambda-triggers" },
+          { group: 6, id: "sns-notifications" },
+          { group: 6, id: "sqs-tasks" },
+          { group: 6, id: "ec2-instances" },
+          { group: 6, id: "rds-cluster" },
+          { group: 6, id: "aurora-cluster" },
+          { group: 6, id: "cloudwatch-monitoring" },
+          { group: 6, id: "waf-security" },
+        ],
+      };
+
+      // Custom color palette
+      const customColors = [
+        "#FF444",
+        "#EA9290",
+        "#804638",
+        "#AA5E4B",
+        "#CD9B8E",
+        "#E0C0B8",
+        "#171717",
+      ];
+
+      // Create a color scale based on the group
+      const color = d3
+        .scaleOrdinal()
+        .domain([1, 2, 3, 4, 5, 6])
+        .range(customColors.slice(0, 6)); // Use first 6 colors for nodes
+
+      // Define the dimensions
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+
+      // Create SVG element
+      const svg = d3
+        .select("#graph")
+        .append("svg")
+        .attr("width", width)
+        .attr("height", height)
+        .call(
+          d3.zoom().on("zoom", function (event) {
+            container.attr("transform", event.transform);
+          })
+        );
+
+      // Container for the graph
+      const container = svg.append("g");
+
+      // Generate random connection words
+      const connectionWords = [
+        "Depends",
+        "Connects",
+        "Requires",
+        "Integrates",
+        "Exchanges",
+        "Provides",
+        "Consumes",
+        "Accesses",
+        "Supplies",
+        "Queries",
+        "Updates",
+        "Monitors",
+        "Controls",
+        "Validates",
+        "Secures",
+        "Logs",
+        "Extends",
+        "Processes",
+        "Authorizes",
+        "Invokes",
+      ];
+
+      // Assign a random explanation to each link
+      data.links.forEach((link) => {
+        link.explanation =
+          connectionWords[Math.floor(Math.random() * connectionWords.length)];
+      });
+
+      // Initialize the links as groups
+      const linkGroups = container
+        .append("g")
+        .selectAll(".link-group")
+        .data(data.links)
+        .enter()
+        .append("g")
+        .attr("class", "link-group");
+
+      // Add the line for each link
+      const link = linkGroups
+        .append("line")
+        .attr("class", "link")
+        .style("stroke-width", 2);
+
+      // Add background rectangles for the link text (initially hidden)
+      const linkTextBg = linkGroups
+        .append("rect")
+        .attr("class", "link-explanation-bg")
+        .style("opacity", 0)
+        .attr("width", 0)
+        .attr("height", 0)
+        .attr("x", 0)
+        .attr("y", 0);
+
+      // Add the explanation text for each link (hidden by default)
+      const linkText = linkGroups
+        .append("text")
+        .attr("class", "link-explanation")
+        .text((d) => d.explanation)
+        .attr("text-anchor", "middle")
+        .attr("dy", -5)
+        .style("font-size", "10px")
+        .style("fill", "#171717")
+        .style("font-weight", "bold")
+        .style("pointer-events", "none")
+        .style("opacity", 0);
+
+      // Initialize the nodes with drag functionality
+      const node = container
+        .append("g")
+        .selectAll(".node")
+        .data(data.nodes)
+        .enter()
+        .append("g")
+        .attr("class", "node")
+        .call(
+          d3
+            .drag()
+            .on("start", dragstarted)
+            .on("drag", dragged)
+            .on("end", dragended)
+        );
+
+      // Add circles to the nodes
+      node
+        .append("circle")
+        .attr("r", (d) => 10 + d.group * 1.5) // Larger circles for higher group numbers
+        .style("fill", (d) => color(d.group))
+        .style("stroke", "#fff")
+        .style("stroke-width", 1.5)
+        .style("transition", "opacity 0.3s");
+
+      // Add background rectangles for node labels
+      const labelBgs = node
+        .append("rect")
+        .attr("class", "node-label-bg")
+        .style("fill", (d) => color(d.group))
+        .style("transition", "opacity 0.3s");
+
+      // Add labels to the nodes
+      const labels = node
+        .append("text")
+        .text((d) => d.id)
+        .attr("dx", 15)
+        .attr("dy", 4)
+        .style("fill", "#ffffff")
+        .style("transition", "opacity 0.3s");
+
+      // Store initial positions for nodes
+      let initialPositions = [];
+
+      // Variables to control force parameters
+      // Reduce movement by lowering alphaTarget and increasing strength values
+      let linkDistance = 20;
+      let chargeStrength = -1000;
+      let nodeCollideRadius = (d) => 20 + d.group * 2;
+
+      // Create the simulation with reduced movement
+      const simulation = d3
+        .forceSimulation(data.nodes)
+        .force(
+          "link",
+          d3
+            .forceLink(data.links)
+            .id((d) => d.id)
+            .distance(() => linkDistance)
+        )
+        .force(
+          "charge",
+          d3.forceManyBody().strength(() => chargeStrength)
+        )
+        .force("center", d3.forceCenter(width / 2, height / 2))
+        .force(
+          "collide",
+          d3.forceCollide().radius(nodeCollideRadius).iterations(2)
+        );
+
+      // Function to handle window resize
+      function handleResize() {
+        const graphContainer = document.getElementById("graph-container");
+        svg
+          .attr("width", graphContainer.clientWidth)
+          .attr("height", graphContainer.clientHeight);
+
+        // Update force center
+        simulation.force(
+          "center",
+          d3.forceCenter(
+            graphContainer.clientWidth / 2,
+            graphContainer.clientHeight / 2
+          )
+        );
+      }
+
+      // Listen for window resize
+      window.addEventListener("resize", handleResize);
+
+      // Initial layout (full screen)
+      toggleLayout(false);
+
+      // Save initial positions after the simulation has settled
+      simulation.on("end", () => {
+        // Store initial positions for all nodes
+        data.nodes.forEach((node) => {
+          initialPositions.push({
+            id: node.id,
+            x: node.x,
+            y: node.y,
+          });
+        });
+      });
+
+      // Update positions during simulation
+      simulation.on("tick", () => {
+        // Update link lines
+        link
+          .attr("x1", (d) => d.source.x)
+          .attr("y1", (d) => d.source.y)
+          .attr("x2", (d) => d.target.x)
+          .attr("y2", (d) => d.target.y);
+
+        // Update link explanation position (text and background)
+        linkGroups.each(function (d) {
+          const linkGroup = d3.select(this);
+          const textElement = linkGroup.select("text");
+          const bgElement = linkGroup.select("rect");
+
+          // Calculate the center point of the link
+          const x = (d.source.x + d.target.x) / 2;
+          const y = (d.source.y + d.target.y) / 2;
+
+          // Position the text at the center
+          textElement.attr("x", x).attr("y", y - 5);
+
+          // Get the bounding box of the text to size the background correctly
+          if (textElement.node()) {
+            const bbox = textElement.node().getBBox();
+
+            // Position the background rectangle to encompass the text
+            bgElement
+              .attr("x", bbox.x - 4)
+              .attr("y", bbox.y - 2)
+              .attr("width", bbox.width + 8)
+              .attr("height", bbox.height + 4);
+          }
+        });
+
+        // Update nodes
+        node.attr("transform", (d) => `translate(${d.x}, ${d.y})`);
+
+        // Update node label backgrounds based on text size
+        node.each(function () {
+          const nodeGroup = d3.select(this);
+          const textElement = nodeGroup.select("text");
+          const bgElement = nodeGroup.select("rect.node-label-bg");
+
+          if (textElement.node()) {
+            const bbox = textElement.node().getBBox();
+
+            // Position the background rectangle to encompass the text
+            bgElement
+              .attr("x", bbox.x - 2)
+              .attr("y", bbox.y - 1)
+              .attr("width", bbox.width + 4)
+              .attr("height", bbox.height + 2);
+          }
+        });
+      });
+
+      // Store current selected node globally
+      let currentSelectedNode = null;
+      let currentConnectedNodeIds = new Set();
+
+      // Function to move a node to the left third of the screen quickly
+      function moveNodeToLeftThird(d) {
+        const graphContainer = document.getElementById("graph-container");
+        const leftThirdX = graphContainer.clientWidth / 3;
+        const centerY = graphContainer.clientHeight / 2;
+
+        // Apply direct positioning to the selected node
+        d.fx = leftThirdX; // Fix the x position
+        d.fy = centerY; // Fix the y position
+
+        // Apply immediate transition
+        d.x = leftThirdX;
+        d.y = centerY;
+
+        // Temporarily boost simulation to better position connected nodes
+        simulation.alpha(0.3).restart();
+
+        // Release fixed position after a delay to allow for later interactions
+        setTimeout(() => {
+          if (currentSelectedNode === d) {
+            // Keep it fixed while selected
+            d.fx = leftThirdX;
+            d.fy = centerY;
+          }
+        }, 100);
+      }
+
+      // Toggle layout function
+      function toggleLayout(showDetails) {
+        const mainContainer = document.getElementById("main-container");
+        const graphContainer = document.getElementById("graph-container");
+        const detailsContainer = document.getElementById("details-container");
+
+        if (showDetails) {
+          // Switch to split view
+          mainContainer.style.flexDirection = "row";
+          graphContainer.style.width = "66.6%";
+          detailsContainer.style.display = "block";
+          detailsContainer.style.width = "33.3%";
+
+          // Trigger resize to update the graph
+          setTimeout(handleResize, 10);
+        } else {
+          // Switch to full screen graph
+          mainContainer.style.flexDirection = "column";
+          graphContainer.style.width = "100%";
+          detailsContainer.style.display = "none";
+
+          // Trigger resize to update the graph
+          setTimeout(handleResize, 10);
+        }
+      }
+
+      // Function to highlight connections
+      function highlightConnections(selectedNode) {
+        // Store current selection
+        currentSelectedNode = selectedNode;
+        currentConnectedNodeIds = new Set();
+
+        // Find connected nodes and links
+        const connectedLinks = [];
+
+        data.links.forEach((link) => {
+          if (
+            link.source.id === selectedNode.id ||
+            link.target.id === selectedNode.id
+          ) {
+            currentConnectedNodeIds.add(
+              typeof link.source === "object" ? link.source.id : link.source
+            );
+            currentConnectedNodeIds.add(
+              typeof link.target === "object" ? link.target.id : link.target
+            );
+            connectedLinks.push(link);
+          }
+        });
+
+        // Reduce opacity for all nodes
+        node.select("circle").style("opacity", 0.2);
+        node.select("text").style("opacity", 0.2);
+        node.select("rect.node-label-bg").style("opacity", 0.2);
+
+        // Highlight the selected node and its connections
+        node
+          .filter((d) => currentConnectedNodeIds.has(d.id))
+          .select("circle")
+          .style("opacity", 1);
+
+        node
+          .filter((d) => currentConnectedNodeIds.has(d.id))
+          .select("text")
+          .style("opacity", 1);
+
+        node
+          .filter((d) => currentConnectedNodeIds.has(d.id))
+          .select("rect.node-label-bg")
+          .style("opacity", 0.8);
+
+        // Highlight connected links
+        linkGroups.each(function (d) {
+          const sourceId =
+            typeof d.source === "object" ? d.source.id : d.source;
+          const targetId =
+            typeof d.target === "object" ? d.target.id : d.target;
+          const isConnected =
+            sourceId === selectedNode.id || targetId === selectedNode.id;
+
+          const linkElement = d3.select(this).select("line");
+          const textElement = d3.select(this).select("text");
+          const bgElement = d3.select(this).select("rect");
+
+          if (isConnected) {
+            linkElement
+              .style("stroke-opacity", 1)
+              .style("stroke", "#F15A26")
+              .style("stroke-width", 3);
+
+            // Show both the text and its background
+            textElement.style("opacity", 1);
+            bgElement.style("opacity", 1);
+          } else {
+            linkElement.style("stroke-opacity", 0.1);
+            textElement.style("opacity", 0);
+            bgElement.style("opacity", 0);
+          }
+        });
+
+        // Display node details
+        const nodeDetailsDiv = document.getElementById("node-details");
+
+        // Get connected nodes
+        const neighbors = [...currentConnectedNodeIds].filter(
+          (id) => id !== selectedNode.id
+        );
+
+        nodeDetailsDiv.innerHTML = `
+          <h2>${selectedNode.id}</h2>
+          <p><strong>Group:</strong> ${selectedNode.group}</p>
+          <p><strong>Connected to ${neighbors.length} nodes:</strong></p>
+          <ul>
+            ${neighbors.map((id) => `<li>${id}</li>`).join("")}
+          </ul>
+        `;
+
+        // Show details container with split layout
+        toggleLayout(true);
+      }
+
+      // Reset highlight function
+      function resetHighlight() {
+        // Release fixed positions for all nodes
+        data.nodes.forEach((node) => {
+          node.fx = null;
+          node.fy = null;
+        });
+
+        // Show all nodes again
+        node.style("display", "");
+
+        // Reset opacities and styles
+        node.select("circle").style("opacity", 1);
+        node.select("text").style("opacity", 1);
+        node.select("rect.node-label-bg").style("opacity", 0.8);
+
+        // Reset link styles
+        linkGroups.style("display", "");
+        link
+          .style("stroke-opacity", 0.6)
+          .style("stroke", "#EA9290")
+          .style("stroke-width", 2);
+
+        // Hide all link texts and backgrounds
+        linkText.style("opacity", 0);
+        linkTextBg.style("opacity", 0);
+
+        // Reset layout to full screen
+        toggleLayout(false);
+
+        // Clear current selection
+        currentSelectedNode = null;
+        currentConnectedNodeIds = new Set();
+
+        // Restart with minimal movement
+        simulation.alpha(0.1).restart();
+      }
+
+      // Function to hide unconnected nodes
+      function hideUnconnectedNodes() {
+        if (!currentSelectedNode) return;
+
+        // Hide unconnected nodes
+        node
+          .filter((d) => !currentConnectedNodeIds.has(d.id))
+          .style("display", "none");
+
+        // Hide links that don't connect to our selected node
+        linkGroups.each(function (d) {
+          const sourceId =
+            typeof d.source === "object" ? d.source.id : d.source;
+          const targetId =
+            typeof d.target === "object" ? d.target.id : d.target;
+          const isConnected =
+            sourceId === currentSelectedNode.id ||
+            targetId === currentSelectedNode.id;
+
+          if (!isConnected) {
+            d3.select(this).style("display", "none");
+          }
+        });
+      }
+
+      // Function to show all nodes
+      function showAllNodes() {
+        if (!currentSelectedNode) return;
+
+        // Show all nodes but keep highlighting
+        node.style("display", "");
+        link.style("display", "");
+
+        // Reapply highlight effect
+        highlightConnections(currentSelectedNode);
+      }
+
+      // Add click handling for nodes
+      node.on("click", (event, d) => {
+        event.stopPropagation(); // Prevent event bubbling
+        highlightConnections(d);
+      });
+
+      // Click on background to reset
+      svg.on("click", (event) => {
+        if (event.target.tagName === "svg" || event.target.tagName === "rect") {
+          resetHighlight();
+        }
+      });
+
+      // Button event handlers
+      d3.select("#reset-highlight").on("click", resetHighlight);
+      d3.select("#hide-others").on("click", hideUnconnectedNodes);
+      d3.select("#show-all").on("click", showAllNodes);
+
+      // Implement toggle labels
+      let labelsVisible = true;
+      d3.select("#toggle-labels").on("click", function () {
+        labelsVisible = !labelsVisible;
+        labels.style("opacity", labelsVisible ? 1 : 0);
+      });
+
+      // Drag functions
+      function dragstarted(event, d) {
+        if (!event.active) simulation.alphaTarget(0.3).restart();
+        d.fx = d.x;
+        d.fy = d.y;
+      }
+
+      function dragged(event, d) {
+        d.fx = event.x;
+        d.fy = event.y;
+      }
+
+      function dragended(event, d) {
+        if (!event.active) simulation.alphaTarget(0.01);
+        // Keep the node fixed where it was dragged
+        // (don't reset d.fx and d.fy to null)
+      }
+    </script>
+  </body>
+</html>
