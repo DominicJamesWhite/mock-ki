@@ -285,94 +285,94 @@
         ],
 
         nodes: [
-          { group: 1, id: "banking-core" },
+          { class: "org", id: "banking-core" },
 
-          { group: 2, id: "banking-platform" },
-          { group: 2, id: "banking-integrations" },
-          { group: 2, id: "banking-frontend" },
+          { class: "app", id: "banking-platform" },
+          { class: "app", id: "banking-integrations" },
+          { class: "app", id: "banking-frontend" },
 
-          // Platform services (group 3)
-          { group: 3, id: "branch-agent-service" },
-          { group: 3, id: "account-management-service" },
-          { group: 3, id: "financial-document-service" },
-          { group: 3, id: "compliance-log-service" },
-          { group: 3, id: "access-control-enforcer-service" },
-          { group: 3, id: "permission-manager-service" },
-          { group: 3, id: "scheduled-transaction-service" },
-          { group: 3, id: "scheduled-transaction-worker" },
-          { group: 3, id: "scheduled-payment-worker" },
-          { group: 3, id: "banking-access-service" },
-          { group: 3, id: "credentials-vault-service" },
-          { group: 3, id: "default-banking-service" },
-          { group: 3, id: "transaction-service" },
-          { group: 3, id: "transaction-batch-service" },
-          { group: 3, id: "notification-email-service" },
-          { group: 3, id: "banking-events-service" },
-          { group: 3, id: "events-processing-worker" },
-          { group: 3, id: "feature-testing-service" },
-          { group: 3, id: "encryption-keys-service" },
-          { group: 3, id: "transaction-logs-service" },
-          { group: 3, id: "customer-alerts-service" },
-          { group: 3, id: "corporate-banking-service" },
-          { group: 3, id: "loan-processing-service" },
-          { group: 3, id: "loan-servicing-worker" },
-          { group: 3, id: "card-registry-service" },
-          { group: 3, id: "payment-gateway-service" },
-          { group: 3, id: "payment-provider-proxy" },
-          { group: 3, id: "financial-products-service" },
-          { group: 3, id: "financial-products-worker" },
-          { group: 3, id: "online-banking-service" },
-          { group: 3, id: "secure-vault-service" },
-          { group: 3, id: "pin-manager-service" },
-          { group: 3, id: "fraud-detection-service" },
-          { group: 3, id: "customer-service" },
-          { group: 3, id: "investment-service" },
-          { group: 3, id: "portfolio-service" },
-          { group: 3, id: "web-banking-service" },
+          // Platform services (group "workload")
+          { class: "workload", id: "branch-agent-service" },
+          { class: "workload", id: "account-management-service" },
+          { class: "workload", id: "financial-document-service" },
+          { class: "workload", id: "compliance-log-service" },
+          { class: "workload", id: "access-control-enforcer-service" },
+          { class: "workload", id: "permission-manager-service" },
+          { class: "workload", id: "scheduled-transaction-service" },
+          { class: "workload", id: "scheduled-transaction-worker" },
+          { class: "workload", id: "scheduled-payment-worker" },
+          { class: "workload", id: "banking-access-service" },
+          { class: "workload", id: "credentials-vault-service" },
+          { class: "workload", id: "default-banking-service" },
+          { class: "workload", id: "transaction-service" },
+          { class: "workload", id: "transaction-batch-service" },
+          { class: "workload", id: "notification-email-service" },
+          { class: "workload", id: "banking-events-service" },
+          { class: "workload", id: "events-processing-worker" },
+          { class: "workload", id: "feature-testing-service" },
+          { class: "workload", id: "encryption-keys-service" },
+          { class: "workload", id: "transaction-logs-service" },
+          { class: "workload", id: "customer-alerts-service" },
+          { class: "workload", id: "corporate-banking-service" },
+          { class: "workload", id: "loan-processing-service" },
+          { class: "workload", id: "loan-servicing-worker" },
+          { class: "workload", id: "card-registry-service" },
+          { class: "workload", id: "payment-gateway-service" },
+          { class: "workload", id: "payment-provider-proxy" },
+          { class: "workload", id: "financial-products-service" },
+          { class: "workload", id: "financial-products-worker" },
+          { class: "workload", id: "online-banking-service" },
+          { class: "workload", id: "secure-vault-service" },
+          { class: "workload", id: "pin-manager-service" },
+          { class: "workload", id: "fraud-detection-service" },
+          { class: "workload", id: "customer-service" },
+          { class: "workload", id: "investment-service" },
+          { class: "workload", id: "portfolio-service" },
+          { class: "workload", id: "web-banking-service" },
 
-          // Integration services (group 4)
-          { group: 4, id: "atm-agent" },
-          { group: 4, id: "aws-cloud-integration" },
-          { group: 4, id: "virtual-card-container" },
-          { group: 4, id: "dns-cloudflare-integration" },
-          { group: 4, id: "dns-wildcard-integration" },
-          { group: 4, id: "high-availability-scaling" },
-          { group: 4, id: "kubernetes-orchestration" },
-          { group: 4, id: "audit-logging-integration" },
-          { group: 4, id: "mobile-banking-dns" },
-          { group: 4, id: "mobile-banking-tls" },
-          { group: 4, id: "database-service" },
-          { group: 4, id: "fixed-deposit-service" },
-          { group: 4, id: "async-deposit-service" },
-          { group: 4, id: "reporting-template" },
-          { group: 4, id: "infrastructure-provisioning" },
-          { group: 4, id: "storage-volumes" },
+          // Integration services (group "workload")
+          { class: "workload", id: "atm-agent" },
+          { class: "workload", id: "aws-cloud-integration" },
+          { class: "workload", id: "virtual-card-container" },
+          { class: "workload", id: "dns-cloudflare-integration" },
+          { class: "workload", id: "dns-wildcard-integration" },
+          { class: "workload", id: "high-availability-scaling" },
+          { class: "workload", id: "kubernetes-orchestration" },
+          { class: "workload", id: "audit-logging-integration" },
+          { class: "workload", id: "mobile-banking-dns" },
+          { class: "workload", id: "mobile-banking-tls" },
+          { class: "workload", id: "database-service" },
+          { class: "workload", id: "fixed-deposit-service" },
+          { class: "workload", id: "async-deposit-service" },
+          { class: "workload", id: "reporting-template" },
+          { class: "workload", id: "infrastructure-provisioning" },
+          { class: "workload", id: "storage-volumes" },
 
-          // Infrastructure components (group 5)
-          { group: 5, id: "database" },
-          { group: 5, id: "message-queue" },
+          // Infrastructure components (group "resource")
+          { class: "resource", id: "database" },
+          { class: "resource", id: "message-queue" },
 
-          // New infrastructure nodes (group 6)
-          { group: 6, id: "postgresql-main" },
-          { group: 6, id: "postgresql-replica" },
-          { group: 6, id: "mongodb-documents" },
-          { group: 6, id: "redis-cache" },
-          { group: 6, id: "redis-session" },
-          { group: 6, id: "s3-document-storage" },
-          { group: 6, id: "s3-backup" },
-          { group: 6, id: "elasticsearch-logs" },
-          { group: 6, id: "kafka-events" },
-          { group: 6, id: "dynamodb-transactions" },
-          { group: 6, id: "memcached-api-cache" },
-          { group: 6, id: "cloudfront-cdn" },
-          { group: 6, id: "lambda-triggers" },
-          { group: 6, id: "sns-notifications" },
-          { group: 6, id: "sqs-tasks" },
-          { group: 6, id: "ec2-instances" },
-          { group: 6, id: "rds-cluster" },
-          { group: 6, id: "aurora-cluster" },
-          { group: 6, id: "cloudwatch-monitoring" },
-          { group: 6, id: "waf-security" },
+          // New infrastructure nodes (group "resource")
+          { class: "resource", id: "postgresql-main" },
+          { class: "resource", id: "postgresql-replica" },
+          { class: "resource", id: "mongodb-documents" },
+          { class: "resource", id: "redis-cache" },
+          { class: "resource", id: "redis-session" },
+          { class: "resource", id: "s3-document-storage" },
+          { class: "resource", id: "s3-backup" },
+          { class: "resource", id: "elasticsearch-logs" },
+          { class: "resource", id: "kafka-events" },
+          { class: "resource", id: "dynamodb-transactions" },
+          { class: "resource", id: "memcached-api-cache" },
+          { class: "resource", id: "cloudfront-cdn" },
+          { class: "resource", id: "lambda-triggers" },
+          { class: "resource", id: "sns-notifications" },
+          { class: "resource", id: "sqs-tasks" },
+          { class: "resource", id: "ec2-instances" },
+          { class: "resource", id: "rds-cluster" },
+          { class: "resource", id: "aurora-cluster" },
+          { class: "resource", id: "cloudwatch-monitoring" },
+          { class: "resource", id: "waf-security" },
         ],
       };
 
@@ -387,11 +387,11 @@
         "#171717", // neutral-900
       ];
 
-      // Create a color scale based on the group
+      // Create a color scale based on the class
       const color = d3
         .scaleOrdinal()
-        .domain([1, 2, 3, 4, 5, 6])
-        .range(customColors.slice(0, 6)); // Use first 6 colors for nodes
+        .domain(["org", "app", "workload", "resource"])
+        .range(customColors.slice(0, 4)); // Use first 4 colors for node classes
 
       // Get the graph container dimensions
       const graphContainer = document.getElementById("graph-container");
@@ -502,12 +502,26 @@
       // Add circles to the nodes
       node
         .append("circle")
-        .attr("r", (d) => 10 + d.group * 1.5) // Larger circles for higher group numbers
+        .attr("r", (d) => {
+          // Set radius based on class
+          switch (d.class) {
+            case "org":
+              return 16; // Largest
+            case "app":
+              return 14;
+            case "workload":
+              return 12;
+            case "resource":
+              return 10; // Smallest
+            default:
+              return 12;
+          }
+        })
         .attr(
           "class",
           "stroke-white stroke-0.5 transition-opacity duration-300"
         )
-        .style("fill", (d) => color(d.group));
+        .style("fill", (d) => color(d.class));
 
       // Add background rectangles for node labels
       const labelBgs = node
@@ -518,7 +532,7 @@
         )
         .attr("rx", 3)
         .attr("ry", 3)
-        .style("fill", (d) => color(d.group));
+        .style("fill", (d) => color(d.class));
 
       // Add labels to the nodes
       const labels = node
@@ -794,8 +808,8 @@
 
         nodeDetailsDiv.innerHTML = `
           <h2 class="text-xl font-bold mb-2">${selectedNode.id}</h2>
-          <p class="mb-2"><span class="font-semibold">Group:</span> ${
-            selectedNode.group
+          <p class="mb-2"><span class="font-semibold">Class:</span> ${
+            selectedNode.class
           }</p>
           <p class="font-semibold mb-1">Connected to ${
             neighbors.length
