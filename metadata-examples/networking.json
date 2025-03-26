@@ -1,0 +1,124 @@
+{
+  "networking": {
+    "load_balancers": [
+      {
+        "id": "api-gateway-lb",
+        "type": "application",
+        "status": "healthy",
+        "endpoints": [
+          {
+            "protocol": "https",
+            "port": 443,
+            "healthy_targets": 5,
+            "unhealthy_targets": 0
+          }
+        ],
+        "metrics": {
+          "requests_per_minute": 42500,
+          "connections_active": 3250,
+          "connection_rate": 850,
+          "error_rate": 0.001,
+          "latency_ms": 12
+        },
+        "bandwidth": {
+          "ingress_mbps": 120,
+          "egress_mbps": 480
+        }
+      },
+      {
+        "id": "internal-services-lb",
+        "type": "network",
+        "status": "healthy",
+        "endpoints": [
+          {
+            "protocol": "tcp",
+            "port": 8080,
+            "healthy_targets": 8,
+            "unhealthy_targets": 0
+          },
+          {
+            "protocol": "tcp",
+            "port": 9090,
+            "healthy_targets": 4,
+            "unhealthy_targets": 0
+          }
+        ],
+        "metrics": {
+          "connections_per_minute": 28500,
+          "connections_active": 2100,
+          "connection_rate": 475,
+          "error_rate": 0.0005
+        },
+        "bandwidth": {
+          "ingress_mbps": 85,
+          "egress_mbps": 320
+        }
+      }
+    ],
+    "vpn": {
+      "id": "corporate-vpn",
+      "status": "operational",
+      "connections": {
+        "active": 125,
+        "capacity": 500
+      },
+      "bandwidth": {
+        "allocated_mbps": 1000,
+        "used_mbps": 320
+      },
+      "metrics": {
+        "availability": 99.995,
+        "latency_ms": 25,
+        "packet_loss": 0.0001
+      }
+    },
+    "cdn": {
+      "id": "static-assets-cdn",
+      "status": "operational",
+      "edge_locations": 42,
+      "cache": {
+        "hit_rate": 0.95,
+        "miss_rate": 0.05
+      },
+      "bandwidth": {
+        "egress_mbps": 850
+      },
+      "metrics": {
+        "requests_per_second": 3800,
+        "error_rate": 0.0008,
+        "latency_ms": 35
+      }
+    },
+    "firewall": {
+      "id": "perimeter-firewall",
+      "status": "active",
+      "rules": {
+        "total": 128,
+        "inbound": 42,
+        "outbound": 86
+      },
+      "metrics": {
+        "packets_processed": 1250000,
+        "connections_tracked": 48500,
+        "blocked_attempts": 1250
+      }
+    },
+    "waf": {
+      "id": "api-waf",
+      "status": "active",
+      "rules": {
+        "total": 85,
+        "custom": 15
+      },
+      "metrics": {
+        "requests_processed": 42500,
+        "blocked_requests": 320,
+        "top_attack_types": [
+          { "type": "SQL Injection", "count": 120 },
+          { "type": "XSS", "count": 85 },
+          { "type": "Path Traversal", "count": 65 }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "storage": [
+    {
+      "id": "document-store",
+      "type": "s3",
+      "status": "operational",
+      "metrics": {
+        "total_objects": 15782340,
+        "total_size": "8.7TB",
+        "daily_uploads": 42500,
+        "daily_downloads": 128700
+      },
+      "performance": {
+        "upload_latency_ms": 85,
+        "download_latency_ms": 65,
+        "availability": 99.999
+      },
+      "cost": {
+        "monthly_estimate": 2800,
+        "currency": "USD"
+      },
+      "compliance": {
+        "encryption": "AES-256",
+        "object_lock": true,
+        "retention_policy": "7 years"
+      }
+    },
+    {
+      "id": "transaction-logs",
+      "type": "block-storage",
+      "status": "operational",
+      "volumes": [
+        {
+          "id": "log-vol-1",
+          "size": "500GB",
+          "used": "320GB",
+          "iops": 5000,
+          "throughput_mbps": 250
+        },
+        {
+          "id": "log-vol-2",
+          "size": "500GB",
+          "used": "280GB",
+          "iops": 5000,
+          "throughput_mbps": 250
+        }
+      ],
+      "performance": {
+        "read_latency_ms": 1.2,
+        "write_latency_ms": 2.5,
+        "availability": 99.999
+      }
+    },
+    {
+      "id": "backup-archive",
+      "type": "glacier",
+      "status": "operational",
+      "metrics": {
+        "total_archives": 1250,
+        "total_size": "45TB",
+        "monthly_additions": "1.2TB"
+      },
+      "retrieval_metrics": {
+        "expedited_retrievals": 2,
+        "standard_retrievals": 8,
+        "bulk_retrievals": 1
+      },
+      "cost": {
+        "monthly_estimate": 450,
+        "currency": "USD"
+      },
+      "compliance": {
+        "encryption": "AES-256",
+        "retention_policy": "10 years"
+      }
+    }
+  ]
+}

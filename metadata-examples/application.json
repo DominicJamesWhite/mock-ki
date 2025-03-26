@@ -1,0 +1,23 @@
+{
+  "application": {
+    "uptime": "45d 12h 37m",
+    "deployments": {
+      "total": 127,
+      "successful": 124,
+      "failed": 3,
+      "last_deployment": "2025-03-24T14:30:00Z"
+    },
+    "performance": {
+      "response_time_avg_ms": 187,
+      "error_rate": 0.02,
+      "availability": 99.998,
+      "apdex_score": 0.95
+    },
+    "dependencies": [
+      "payment-gateway",
+      "fraud-detection",
+      "customer-database",
+      "notification-service"
+    ]
+  }
+}

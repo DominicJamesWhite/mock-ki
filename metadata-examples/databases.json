@@ -1,0 +1,91 @@
+{
+  "databases": [
+    {
+      "id": "customer-db",
+      "type": "postgresql",
+      "version": "15.3",
+      "status": "healthy",
+      "size": "512GB",
+      "connections": {
+        "active": 78,
+        "idle": 22,
+        "max": 500
+      },
+      "performance": {
+        "queries_per_second": 3250,
+        "read_iops": 4800,
+        "write_iops": 1200,
+        "avg_query_time_ms": 12,
+        "slow_queries": 5
+      },
+      "storage": {
+        "allocated": "1TB",
+        "used": "512GB",
+        "usage_percent": 51.2
+      },
+      "replication": {
+        "lag_seconds": 0.05,
+        "status": "synchronized"
+      },
+      "backups": {
+        "last_successful": "2025-03-26T01:00:00Z",
+        "retention_days": 30,
+        "size": "485GB"
+      }
+    },
+    {
+      "id": "transactions-db",
+      "type": "mongodb",
+      "version": "6.0",
+      "status": "healthy",
+      "size": "1.2TB",
+      "connections": {
+        "active": 125,
+        "idle": 35,
+        "max": 1000
+      },
+      "performance": {
+        "operations_per_second": 5800,
+        "read_ops": 4200,
+        "write_ops": 1600,
+        "avg_operation_time_ms": 8
+      },
+      "storage": {
+        "allocated": "2TB",
+        "used": "1.2TB",
+        "usage_percent": 60
+      },
+      "replication": {
+        "lag_seconds": 0.08,
+        "status": "synchronized"
+      },
+      "backups": {
+        "last_successful": "2025-03-26T02:00:00Z",
+        "retention_days": 30,
+        "size": "1.1TB"
+      }
+    },
+    {
+      "id": "redis-cache",
+      "type": "redis",
+      "version": "7.0",
+      "status": "healthy",
+      "connections": {
+        "active": 210,
+        "max": 10000
+      },
+      "performance": {
+        "operations_per_second": 25000,
+        "hit_rate": 0.92,
+        "miss_rate": 0.08,
+        "evictions": 120
+      },
+      "memory": {
+        "allocated": "64GB",
+        "used": "48GB",
+        "usage_percent": 75,
+        "fragmentation_ratio": 1.08
+      }
+    }
+  ]
+}

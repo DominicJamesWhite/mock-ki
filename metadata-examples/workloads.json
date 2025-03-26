@@ -1,0 +1,113 @@
+{
+  "workloads": [
+    {
+      "id": "transaction-processor",
+      "type": "stateful",
+      "status": "running",
+      "replicas": {
+        "desired": 5,
+        "available": 5,
+        "unavailable": 0
+      },
+      "resources": {
+        "cpu": {
+          "requests": "2",
+          "limits": "4",
+          "usage_avg": "1.7",
+          "usage_peak": "3.2"
+        },
+        "memory": {
+          "requests": "4Gi",
+          "limits": "8Gi",
+          "usage_avg": "3.2Gi",
+          "usage_peak": "5.1Gi"
+        }
+      },
+      "metrics": {
+        "transactions_per_second": 1250,
+        "queue_depth": 42,
+        "processing_time_ms": 78,
+        "error_rate": 0.003
+      },
+      "health_checks": {
+        "readiness": "passing",
+        "liveness": "passing",
+        "last_failure": "2025-03-20T03:42:15Z"
+      }
+    },
+    {
+      "id": "account-service",
+      "type": "stateless",
+      "status": "running",
+      "replicas": {
+        "desired": 3,
+        "available": 3,
+        "unavailable": 0
+      },
+      "resources": {
+        "cpu": {
+          "requests": "1",
+          "limits": "2",
+          "usage_avg": "0.8",
+          "usage_peak": "1.7"
+        },
+        "memory": {
+          "requests": "2Gi",
+          "limits": "4Gi",
+          "usage_avg": "1.8Gi",
+          "usage_peak": "2.9Gi"
+        }
+      },
+      "metrics": {
+        "requests_per_second": 850,
+        "response_time_ms": 65,
+        "error_rate": 0.001
+      },
+      "health_checks": {
+        "readiness": "passing",
+        "liveness": "passing",
+        "last_failure": "2025-03-15T14:22:10Z"
+      }
+    },
+    {
+      "id": "fraud-detection",
+      "type": "stateful",
+      "status": "running",
+      "replicas": {
+        "desired": 2,
+        "available": 2,
+        "unavailable": 0
+      },
+      "resources": {
+        "cpu": {
+          "requests": "4",
+          "limits": "8",
+          "usage_avg": "3.2",
+          "usage_peak": "7.1"
+        },
+        "memory": {
+          "requests": "16Gi",
+          "limits": "32Gi",
+          "usage_avg": "14.2Gi",
+          "usage_peak": "22.8Gi"
+        },
+        "gpu": {
+          "requests": "1",
+          "usage_avg": "0.7",
+          "usage_peak": "0.95"
+        }
+      },
+      "metrics": {
+        "analyses_per_second": 320,
+        "detection_accuracy": 0.9985,
+        "false_positives": 0.0012,
+        "processing_time_ms": 125
+      },
+      "health_checks": {
+        "readiness": "passing",
+        "liveness": "passing",
+        "last_failure": "2025-03-10T08:17:45Z"
+      }
+    }
+  ]
+}

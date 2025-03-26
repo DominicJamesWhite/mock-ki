@@ -1,0 +1,29 @@
+{
+  "environment": {
+    "id": "production",
+    "status": "operational",
+    "region": "eu-central-1",
+    "created_at": "2023-05-15T08:00:00Z",
+    "last_updated": "2025-03-25T09:15:00Z",
+    "compliance": {
+      "pci_dss": "compliant",
+      "gdpr": "compliant",
+      "sox": "compliant"
+    },
+    "security": {
+      "vulnerability_count": 2,
+      "critical_issues": 0,
+      "last_security_scan": "2025-03-24T01:00:00Z"
+    },
+    "cost": {
+      "monthly_estimate": 24750,
+      "currency": "USD",
+      "breakdown": {
+        "compute": 12500,
+        "storage": 5800,
+        "network": 3200,
+        "managed_services": 3250
+      }
+    }
+  }
+}

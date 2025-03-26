@@ -1,0 +1,153 @@
+{
+  "kubernetes": {
+    "cluster": {
+      "id": "prod-finance-cluster",
+      "version": "1.28.4",
+      "status": "healthy",
+      "nodes": {
+        "total": 12,
+        "ready": 12,
+        "unready": 0
+      },
+      "capacity": {
+        "cpu_cores": 192,
+        "memory_gb": 768,
+        "pods": 1200
+      },
+      "utilization": {
+        "cpu_percent": 68,
+        "memory_percent": 72,
+        "pods_percent": 45
+      }
+    },
+    "node_pools": [
+      {
+        "id": "general-purpose",
+        "machine_type": "c6g.4xlarge",
+        "nodes": 8,
+        "autoscaling": {
+          "enabled": true,
+          "min": 6,
+          "max": 12
+        },
+        "utilization": {
+          "cpu_percent": 72,
+          "memory_percent": 68
+        }
+      },
+      {
+        "id": "memory-optimized",
+        "machine_type": "r6g.4xlarge",
+        "nodes": 4,
+        "autoscaling": {
+          "enabled": true,
+          "min": 2,
+          "max": 6
+        },
+        "utilization": {
+          "cpu_percent": 58,
+          "memory_percent": 82
+        }
+      }
+    ],
+    "namespaces": [
+      {
+        "id": "core-banking",
+        "status": "active",
+        "pods": {
+          "total": 42,
+          "running": 42,
+          "pending": 0,
+          "failed": 0
+        },
+        "resource_quotas": {
+          "cpu": {
+            "limit": "80",
+            "used": "52"
+          },
+          "memory": {
+            "limit": "320Gi",
+            "used": "210Gi"
+          }
+        }
+      },
+      {
+        "id": "payment-processing",
+        "status": "active",
+        "pods": {
+          "total": 28,
+          "running": 28,
+          "pending": 0,
+          "failed": 0
+        },
+        "resource_quotas": {
+          "cpu": {
+            "limit": "40",
+            "used": "28"
+          },
+          "memory": {
+            "limit": "160Gi",
+            "used": "120Gi"
+          }
+        }
+      },
+      {
+        "id": "fraud-detection",
+        "status": "active",
+        "pods": {
+          "total": 15,
+          "running": 15,
+          "pending": 0,
+          "failed": 0
+        },
+        "resource_quotas": {
+          "cpu": {
+            "limit": "32",
+            "used": "24"
+          },
+          "memory": {
+            "limit": "128Gi",
+            "used": "98Gi"
+          }
+        }
+      }
+    ],
+    "hpa": [
+      {
+        "id": "transaction-processor-hpa",
+        "target": "transaction-processor",
+        "min_replicas": 3,
+        "max_replicas": 10,
+        "current_replicas": 5,
+        "target_cpu_utilization": 70,
+        "current_cpu_utilization": 68
+      },
+      {
+        "id": "account-service-hpa",
+        "target": "account-service",
+        "min_replicas": 2,
+        "max_replicas": 6,
+        "current_replicas": 3,
+        "target_cpu_utilization": 70,
+        "current_cpu_utilization": 62
+      }
+    ],
+    "events": [
+      {
+        "type": "Normal",
+        "reason": "ScalingReplicaSet",
+        "object": "Deployment/transaction-processor",
+        "message": "Scaled up replica set transaction-processor-7d8f9c7b7c to 5",
+        "timestamp": "2025-03-26T08:42:15Z"
+      },
+      {
+        "type": "Warning",
+        "reason": "FailedScheduling",
+        "object": "Pod/fraud-detection-ml-5d7f8c6b7c",
+        "message": "0/12 nodes are available: 12 Insufficient memory",
+        "timestamp": "2025-03-26T07:15:22Z",
+        "count": 3
+      }
+    ]
+  }
+}

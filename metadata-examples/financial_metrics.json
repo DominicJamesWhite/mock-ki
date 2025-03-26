@@ -1,0 +1,51 @@
+{
+  "financial_metrics": {
+    "transaction_processing": {
+      "total_transactions_today": 1250000,
+      "transaction_volume_usd": 78500000,
+      "average_transaction_value": 62.8,
+      "peak_tps": 1850,
+      "transaction_types": {
+        "payments": 680000,
+        "transfers": 420000,
+        "withdrawals": 85000,
+        "deposits": 65000
+      },
+      "success_rate": 99.998,
+      "failure_breakdown": {
+        "insufficient_funds": 850,
+        "timeout": 120,
+        "validation_error": 75,
+        "fraud_prevention": 45,
+        "system_error": 10
+      }
+    },
+    "fraud_detection": {
+      "transactions_analyzed": 1250000,
+      "flagged_transactions": 3250,
+      "confirmed_fraud": 125,
+      "false_positives": 3125,
+      "detection_rate": 0.9985,
+      "average_analysis_time_ms": 125
+    },
+    "compliance": {
+      "kyc_verifications_today": 1250,
+      "aml_alerts": 85,
+      "regulatory_reports_pending": 12,
+      "compliance_score": 0.98
+    },
+    "customer_activity": {
+      "active_users_today": 285000,
+      "new_accounts_today": 1250,
+      "mobile_app_logins": 420000,
+      "web_portal_logins": 185000,
+      "customer_service_requests": 3250
+    },
+    "system_health": {
+      "core_banking_availability": 99.999,
+      "payment_gateway_availability": 99.998,
+      "mobile_app_availability": 99.995,
+      "web_portal_availability": 99.997
+    }
+  }
+}
