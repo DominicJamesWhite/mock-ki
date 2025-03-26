@@ -1,54 +1,172 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>D3 Force-Directed Graph</title>
+    <title>Canyon</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
-      tailwind.config = {
-        theme: {
-          extend: {
-            colors: {
-              text: "#171717",
-              text2: "#343434",
-              link: "#423b57",
-              tableRowBorder: "#ddbab1",
-              border: "#ff4444",
-              border2: "#ff4444",
-              headerBG: "#fff2ee",
-              tableRow: "#f0d4cc",
-              buttonBG: "#ea9290",
-              brand: "#f15a26",
-              mainBG: "#F8F1EF",
-              successGreen: "#09983a",
-              // Keep existing colors for backward compatibility
-              primary: "#ffffff", // Same as buttonBG
-              secondary: "#f0d4cc", // Same as successGreen
-              background: "#fff2ee", // Using headerBG as background
+      // Define theme colors
+      const lightTheme = {
+        text: "#171717",
+        text2: "#343434",
+        link: "#423b57",
+        tableRowBorder: "#ddbab1",
+        border: "#ff4444",
+        headerBG: "#fff2ee",
+        tableRow: "#f0d4cc",
+        buttonBG: "#ea9290",
+        brand: "#f15a26",
+        mainBG: "#F8F1EF",
+        successGreen: "#09983a",
+        primary: "#ffffff",
+        secondary: "#f0d4cc",
+        background: "#fff2ee",
+      };
+
+      const darkTheme = {
+        text: "#FFFFFF",
+        text2: "#EAEAEA",
+        link: "#FFFFFF",
+        tableRowBorder: "#8577B0",
+        border: "#7C66CF",
+        headerBG: "#150E20",
+        tableRow: "#150E20",
+        buttonBG: "#423B57",
+        brand: "#F15A26",
+        mainBG: "#161616",
+        successGreen: "#50D37D",
+        primary: "#1f1f1f",
+        secondary: "#3d2c27",
+        background: "#2a1a14",
+      };
+
+      // Get user's theme preference from localStorage or system preference
+      function getThemePreference() {
+        const savedTheme = localStorage.getItem("theme");
+        if (savedTheme) {
+          return savedTheme;
+        }
+
+        // Check for system preference and return light or dark directly
+        if (
+          window.matchMedia &&
+          window.matchMedia("(prefers-color-scheme: dark)").matches
+        ) {
+          return "dark";
+        }
+
+        return "light"; // Default to light
+      }
+
+      // Set initial theme
+      const initialTheme = getThemePreference();
+      document.documentElement.setAttribute("data-theme", initialTheme);
+
+      // Apply theme colors based on preference
+      function applyThemeColors() {
+        const currentTheme =
+          document.documentElement.getAttribute("data-theme");
+        let colors;
+
+        if (currentTheme === "dark") {
+          colors = darkTheme;
+        } else {
+          // Default to light theme for any other value
+          colors = lightTheme;
+        }
+
+        // Configure Tailwind with the selected theme colors
+        tailwind.config = {
+          theme: {
+            extend: {
+              colors: colors,
             },
           },
-        },
-      };
+        };
+      }
+
+      // Apply initial theme
+      applyThemeColors();
     </script>
   </head>
   <body class="font-sans m-0 p-0 bg-mainBG h-screen flex flex-col">
     <!-- Menubar -->
     <div
-      class="flex justify-between items-center bg-headerBG px-8 py-4 border-b border-border2"
+      class="flex justify-between items-center bg-headerBG px-8 py-4 border-b border-border"
     >
-      <div class="text-black font-bold text-lg">
+      <div class="text-text font-bold text-lg">
         <img src="image.png" alt="Logo" class="h-[1em] inline-block" />
       </div>
-      <div class="text-black underline text-md">Documentation</div>
+      <div class="flex items-center gap-4">
+        <select
+          id="theme-selector"
+          class="bg-headerBG text-text border border-border rounded py-1 px-2 text-sm"
+        >
+          <option value="light">🌝</option>
+          <option value="dark">🌚</option>
+        </select>
+        <div class="text-text underline text-md">Documentation</div>
+      </div>
     </div>
 
     <div
       class="flex flex-col flex-1 transition-all duration-500 overflow-hidden"
       id="main-container"
     >
+      <script>
+        // Theme switching functionality
+        document.addEventListener("DOMContentLoaded", function () {
+          const themeSelector = document.getElementById("theme-selector");
+
+          // Set the dropdown to match the current theme
+          themeSelector.value = getThemePreference();
+
+          // Listen for theme changes
+          themeSelector.addEventListener("change", function () {
+            const selectedTheme = this.value;
+            document.documentElement.setAttribute("data-theme", selectedTheme);
+            localStorage.setItem("theme", selectedTheme);
+            applyThemeColors();
+
+            // Update D3 visualization colors
+            updateVisualizationColors();
+
+            // Force redraw of the page to apply new theme
+            document.body.style.display = "none";
+            setTimeout(() => {
+              document.body.style.display = "";
+            }, 5);
+          });
+
+          // Listen for system theme changes and update if no saved preference
+          if (window.matchMedia) {
+            window
+              .matchMedia("(prefers-color-scheme: dark)")
+              .addEventListener("change", function (e) {
+                // Only apply system preference if there's no saved theme
+                if (!localStorage.getItem("theme")) {
+                  // Set theme based on new system preference
+                  const newTheme = e.matches ? "dark" : "light";
+                  document.documentElement.setAttribute("data-theme", newTheme);
+                  themeSelector.value = newTheme;
+                  applyThemeColors();
+
+                  // Update D3 visualization colors
+                  updateVisualizationColors();
+
+                  // Force redraw
+                  document.body.style.display = "none";
+                  setTimeout(() => {
+                    document.body.style.display = "";
+                  }, 5);
+                }
+              });
+          }
+        });
+      </script>
       <div id="button-bar" class="flex gap-2.5 px-8 pt-8 pb-2 items-center">
         <button
           id="reset-highlight"
-          class="bg-buttonBG text-black border-none py-2 px-4 rounded cursor-pointer text-sm transition-colors hover:bg-secondary"
+          class="bg-buttonBG text-text border-none py-2 px-4 rounded cursor-pointer text-sm transition-colors hover:bg-secondary"
         >
           Reset View
         </button>
@@ -57,11 +175,11 @@
             type="text"
             id="search-nodes"
             placeholder="Search nodes..."
-            class="border border-border2 rounded py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-brand"
+            class="border border-border rounded py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-brand"
           />
           <button
             id="clear-search"
-            class="absolute right-2 top-1/2 transform -translate-y-1/2 text-xs text-gray-400 hover:text-gray-600"
+            class="absolute right-2 top-1/2 transform -translate-y-1/2 text-xs text-text opacity-50 hover:opacity-80"
             style="display: none"
           >
             ✕
@@ -76,7 +194,7 @@
           class="flex-1 transition-all h-full overflow-hidden duration-500 border rounded-md border-border"
           id="graph-container"
         >
-          <div id="graph" class="w-full h-full bg-white"></div>
+          <div id="graph" class="w-full h-full bg-mainBG"></div>
         </div>
         <div
           class="hidden bg-background overflow-scroll transition-all border border-border rounded-md p-4 duration-500 ml-5"
@@ -86,7 +204,7 @@
           <div id="node-actions" class="mt-2.5">
             <button
               id="toggle-nodes"
-              class="bg-primary text-black border-none py-2 px-4 rounded cursor-pointer text-sm transition-colors hover:bg-secondary"
+              class="bg-primary text-text border-none py-2 px-4 rounded cursor-pointer text-sm transition-colors hover:bg-secondary"
             >
               Hide Unconnected Nodes
             </button>
@@ -376,22 +494,75 @@
         ],
       };
 
-      // Custom color palette using Tailwind standard colors (lighter shades)
-      const customColors = [
-        "#fecaca", // red-200
-        "#fed7aa", // orange-200
-        "#bfdbfe", // blue-200
-        "#a7f3d0", // emerald-200
-        "#ddd6fe", // violet-200
-        "#fbcfe8", // pink-200
-        "#171717", // neutral-900
-      ];
+      // Function to get current theme colors
+      function getThemeColors() {
+        const currentTheme =
+          document.documentElement.getAttribute("data-theme");
+        let colors;
+
+        if (currentTheme === "dark") {
+          colors = darkTheme;
+        } else {
+          colors = lightTheme; // Default to light theme for any other value
+        }
+
+        return colors;
+      }
+
+      // Get theme-aware color palette
+      function getNodeColorPalette() {
+        const themeColors = getThemeColors();
+
+        // Use different color palettes based on theme
+        if (themeColors === darkTheme) {
+          return [
+            "#8B5CF6", // violet-500
+            "#EC4899", // pink-500
+            "#3B82F6", // blue-500
+            "#10B981", // emerald-500
+          ];
+        } else {
+          return [
+            "#fecaca", // red-200
+            "#fed7aa", // orange-200
+            "#bfdbfe", // blue-200
+            "#a7f3d0", // emerald-200
+          ];
+        }
+      }
 
       // Create a color scale based on the class
-      const color = d3
+      let color = d3
         .scaleOrdinal()
         .domain(["org", "app", "workload", "resource"])
-        .range(customColors.slice(0, 4)); // Use first 4 colors for node classes
+        .range(getNodeColorPalette()); // Use theme-aware colors
+
+      // Function to update visualization colors when theme changes
+      function updateVisualizationColors() {
+        // Update color scale with new theme colors
+        color.range(getNodeColorPalette());
+        const themeColors = getThemeColors();
+
+        // Update node colors
+        node.selectAll("circle").style("fill", (d) => color(d.class));
+        node
+          .selectAll("rect.node-label-bg")
+          .style("fill", (d) => color(d.class));
+
+        // Update text colors
+        node.selectAll("text").style("fill", themeColors.text);
+        linkText.style("fill", themeColors.text);
+
+        // Update link colors if not highlighted
+        if (!currentSelectedNode) {
+          link.style("stroke", themeColors.buttonBG);
+        }
+
+        // If there's a selected node, reapply highlighting with new theme colors
+        if (currentSelectedNode) {
+          highlightConnections(currentSelectedNode);
+        }
+      }
 
       // Get the graph container dimensions
       const graphContainer = document.getElementById("graph-container");
@@ -464,7 +635,7 @@
       // Add background rectangles for the link text (initially hidden)
       const linkTextBg = linkGroups
         .append("rect")
-        .attr("class", "fill-tableRow ounded-md opacity-0")
+        .attr("class", "fill-tableRowBorder rounded-md opacity-0")
         .attr("rx", 3)
         .attr("ry", 3)
         .attr("width", 0)
@@ -475,10 +646,8 @@
       // Add the explanation text for each link (hidden by default)
       const linkText = linkGroups
         .append("text")
-        .attr(
-          "class",
-          "text-xs font-bold text-text pointer-events-none opacity-0"
-        )
+        .attr("class", "text-xs font-bold pointer-events-none opacity-0")
+        .style("fill", () => getThemeColors().text) // Use theme text color
         .text((d) => d.explanation)
         .attr("text-anchor", "middle")
         .attr("dy", -5);
@@ -540,8 +709,9 @@
         .text((d) => d.id)
         .attr(
           "class",
-          "text-white text-xs pointer-events-none transition-opacity duration-300"
+          "text-xs pointer-events-none transition-opacity duration-300"
         )
+        .style("fill", () => getThemeColors().text) // Use theme text color
         .attr("dx", 15)
         .attr("dy", 4);
 
@@ -783,9 +953,10 @@
           const bgElement = d3.select(this).select("rect");
 
           if (isConnected) {
+            const themeColors = getThemeColors();
             linkElement
               .style("stroke-opacity", 1)
-              .style("stroke", "#F15A26")
+              .style("stroke", themeColors.brand) // Use theme brand color
               .style("stroke-width", 3);
 
             // Show both the text and its background
@@ -853,9 +1024,10 @@
 
         // Reset link styles
         linkGroups.style("display", "");
+        const themeColors = getThemeColors();
         link
           .style("stroke-opacity", 0.6)
-          .style("stroke", "#EA9290")
+          .style("stroke", themeColors.buttonBG) // Use theme buttonBG color
           .style("stroke-width", 2);
 
         // Hide all link texts and backgrounds
