@@ -16,6 +16,7 @@
         buttonBG: "#ea9290",
         brand: "#f15a26",
         mainBG: "#F8F1EF",
+        secondBG: "#F2E6E2",
         successGreen: "#09983a",
         primary: "#ffffff",
         secondary: "#f0d4cc",
@@ -33,6 +34,7 @@
         buttonBG: "#423B57",
         brand: "#F15A26",
         mainBG: "#161616",
+        secondBG: "#292538",
         successGreen: "#50D37D",
         primary: "#1f1f1f",
         secondary: "#3d2c27",
@@ -104,7 +106,12 @@
           <option value="light">🌝</option>
           <option value="dark">🌚</option>
         </select>
-        <div class="text-text underline text-md">Documentation</div>
+        <div
+          class="text-link text-md cursor-not-allowed"
+          title="We're still working on our docs."
+        >
+          Documentation
+        </div>
       </div>
     </div>
 
@@ -166,7 +173,7 @@
       <div id="button-bar" class="flex gap-2.5 px-8 pt-8 pb-2 items-center">
         <button
           id="reset-highlight"
-          class="bg-buttonBG text-text border-none py-2 px-4 rounded cursor-pointer text-sm transition-colors hover:bg-secondary"
+          class="bg-buttonBG text-text border-none py-2 px-4 rounded cursor-pointer text-sm transition-colors hover:bg-tableRowBorder"
         >
           Reset View
         </button>
@@ -179,7 +186,7 @@
           />
           <button
             id="clear-search"
-            class="absolute right-2 top-1/2 transform -translate-y-1/2 text-xs text-text opacity-50 hover:opacity-80"
+            class="absolute right-2 top-1/2 transform -translate-y-1/2 text-xs text-text opacity-70 hover:opacity-100"
             style="display: none"
           >
             ✕
@@ -197,14 +204,14 @@
           <div id="graph" class="w-full h-full bg-mainBG"></div>
         </div>
         <div
-          class="hidden bg-background overflow-scroll transition-all border border-border rounded-md p-4 duration-500 ml-5"
+          class="hidden bg-secondBG overflow-scroll transition-all border border-border rounded-md p-4 duration-500 ml-5"
           id="details-container"
         >
           <div id="node-details"></div>
           <div id="node-actions" class="mt-2.5">
             <button
               id="toggle-nodes"
-              class="bg-primary text-text border-none py-2 px-4 rounded cursor-pointer text-sm transition-colors hover:bg-secondary"
+              class="bg-buttonBG text-text border-none py-2 px-4 rounded cursor-pointer text-sm transition-colors hover:bg-tableRowBorder"
             >
               Hide Unconnected Nodes
             </button>
@@ -978,18 +985,18 @@
         );
 
         nodeDetailsDiv.innerHTML = `
-          <h2 class="text-xl font-bold mb-2">${selectedNode.id}</h2>
-          <p class="mb-2"><span class="font-semibold">Class:</span> ${
+          <h2 class="text-xl font-bold mb-2 text-text">${selectedNode.id}</h2>
+          <p class="mb-2 text-text"><span class="font-semibold">Class:</span> ${
             selectedNode.class
           }</p>
-          <p class="font-semibold mb-1">Connected to ${
+          <p class="font-semibold mb-1 text-text">Connected to ${
             neighbors.length
           } nodes:</p>
-          <ul class="bg-primary bg-opacity-50 rounded p-2 max-h-60 overflow-y-auto">
+          <ul class="bg-primary bg-opacity-50 rounded p-2 max-h-80 overflow-y-auto">
             ${neighbors
               .map(
                 (id) =>
-                  `<li class="mb-1 hover:bg-primary hover:bg-opacity-20 p-1 rounded">${id}</li>`
+                  `<li class="mb-1 hover:bg-primary hover:bg-opacity-20 p-1 rounded text-text">${id}</li>`
               )
               .join("")}
           </ul>
